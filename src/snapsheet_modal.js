@@ -5,6 +5,7 @@ import { useBackButton } from "react-native-push-back";
 import { doRendable, isNumber } from "./utils";
 import { PortalContext } from "./provider";
 import { styling } from "./styling";
+import SnapSheet from "./snapsheet";
 
 const ModalState = ['closed', 'middle', 'opened'];
 const CenteredSheetStyle = { width: 0 };
