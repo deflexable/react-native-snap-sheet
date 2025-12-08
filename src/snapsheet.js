@@ -162,10 +162,16 @@ const SnapSheet = forwardRef(function SnapSheet({
             onMoveShouldSetPanResponderCapture: (_, gesture) => {
                 const { scrollY } = scrollRefObj.current[instantPrefferAnchor.current] || {};
 
+                const isMovingY = (minChange = 3) =>
+                    gesture.dy > minChange &&
+                    (gesture.dy / (gesture.dy + gesture.dx)) >= .75;
+
                 const shouldCapture = !disabled && (
                     !instantScrollEnabled.current ||
-                    (scrollY <= 0 && gesture.dy > 1) // If sheet is expanded & ScrollView is at top → capture downward drags
+                    (scrollY <= 0 && isMovingY(5)) ||
+                    (instantPrefferAnchor.current === undefined && isMovingY(10))
                 );
+                if (shouldCapture) setScrollEnabled(false);
                 // console.log('onMoveShouldSetPanResponderCapture shouldCapture:', shouldCapture, ' stats:', { gesture, scrollOffset: scrollY, instantScrollEnabled: instantScrollEnabled.current }, ' gesture.dy > 0:', gesture.dy > 1);
                 return shouldCapture;
             },
@@ -234,11 +240,7 @@ const SnapSheet = forwardRef(function SnapSheet({
     const updatePrefferAnchor = () => {
         const rankedAnchors = Object.entries(scrollRefObj.current).sort((a, b) => compareReactPaths(a[1].location, b[1].location));
         const directAnchor = rankedAnchors.find(v => v[1].anchorId === currentAnchorId);
-        if (directAnchor) return setPrefferedAnchor(directAnchor[0]);
-
-        const normalAnchor = rankedAnchors.find(v => !!v[1].anchorId);
-        if (normalAnchor) return setPrefferedAnchor(normalAnchor[0]);
-        setPrefferedAnchor(rankedAnchors[0]?.[0]);
+        setPrefferedAnchor(directAnchor?.[0]);
     }
 
     const onAnchorScroll = (e, instanceId) => {

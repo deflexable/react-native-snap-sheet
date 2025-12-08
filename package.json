@@ -1,6 +1,6 @@
 {
   "name": "react-native-snap-sheet",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "",
   "homepage": "https://github.com/deflexable/react-native-snap-sheet#readme",
   "bugs": {
@@ -19,7 +19,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "react-native-dodge-keyboard": "^1.0.1",
+    "react-native-dodge-keyboard": "^1.0.2",
     "react-native-push-back": "^1.0.0"
   }
 }
