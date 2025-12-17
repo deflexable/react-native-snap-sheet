@@ -9,6 +9,8 @@ const PixelRate = 70 / 100; // 70ms to 100 pixels
 const SnapSheet = forwardRef(function SnapSheet({
     snapPoints = [],
     initialSnapIndex = 0,
+    minSnapIndex = 0,
+    __loosenMinSnap,
     onSnapIndex,
     onSnapFinish,
     snapWhileDecelerating = false,
@@ -17,31 +19,37 @@ const SnapSheet = forwardRef(function SnapSheet({
     inheritScrollVelocityOnCollapse,
     renderHandle,
     handleColor,
-    keyboardDodgingBehaviour = 'optimum', // off, whole
+    keyboardDodgingBehaviour = 'optimum',
     keyboardDodgingOffset = 10,
     children,
     disabled,
     currentAnchorId,
     __shaky_sheet
 }, ref) {
-    const isLift = keyboardDodgingBehaviour === 'whole';
+    const isLiftAlways = keyboardDodgingBehaviour === 'whole-always';
+    const isLift = isLiftAlways || keyboardDodgingBehaviour === 'whole';
     const isOptimum = keyboardDodgingBehaviour === 'optimum';
 
-    if (!['optimum', 'whole', 'off'].includes(keyboardDodgingBehaviour))
-        throw `keyboardDodgingBehaviour must be any of ${['optimum', 'whole', 'off']} but got ${keyboardDodgingBehaviour}`;
+    if (!['optimum', 'whole', 'whole-always', 'off'].includes(keyboardDodgingBehaviour))
+        throw `keyboardDodgingBehaviour must be any of ${['optimum', 'whole', 'whole-always', 'off']} but got ${keyboardDodgingBehaviour}`;
 
-    useMemo(() => {
-        if (snapPoints.length < 2) throw new Error('snapPoints must have at least two items');
-        snapPoints.forEach((v, i, a) => {
-            if (typeof v !== 'number' || !isNumber(v))
-                throw new Error(`snapPoints must have a valid number but got ${v} at position ${i}`);
-            if (i !== a.length - 1 && v >= a[i + 1])
-                throw new Error(`snapPoints must be in accending order but got ${v} before ${a[i + 1]}`);
-        });
-        if (!Number.isInteger(initialSnapIndex) || initialSnapIndex < 0)
-            throw new Error(`initialSnapIndex should be a positive integer but got:${initialSnapIndex}`);
-        if (initialSnapIndex >= snapPoints.length) throw new Error(`initialSnapIndex is out of range`);
-    }, snapPoints);
+    if (snapPoints.length < 2) throw new Error('snapPoints must have at least two items');
+    snapPoints.forEach((v, i, a) => {
+        if (typeof v !== 'number' || !isNumber(v))
+            throw new Error(`snapPoints must have a valid number but got ${v} at position ${i}`);
+        if (i !== a.length - 1 && v >= a[i + 1])
+            throw new Error(`snapPoints must be in accending order but got ${v} before ${a[i + 1]}`);
+    });
+    if (!Number.isInteger(initialSnapIndex) || initialSnapIndex < 0)
+        throw new Error(`initialSnapIndex should be a positive integer but got:${initialSnapIndex}`);
+    if (initialSnapIndex >= snapPoints.length) throw new Error(`initialSnapIndex is out of range`);
+
+    if (!Number.isInteger(minSnapIndex) || minSnapIndex < 0)
+        throw new Error(`minSnapIndex should be a positive integer but got:${minSnapIndex}`);
+
+    if (minSnapIndex >= snapPoints.length) throw new Error(`minSnapIndex is out of range`);
+    initialSnapIndex = Math.max(initialSnapIndex, minSnapIndex);
+
     const initSnapPoints = snapPoints;
 
     const [scrollEnabled, setScrollEnabled] = useState(false);
@@ -51,13 +59,16 @@ const SnapSheet = forwardRef(function SnapSheet({
     const [finishedIndex, setFinishedIndex] = useState(initialSnapIndex);
     const [prefferedAnchor, setPrefferedAnchor] = useState();
 
-    const extraLift = dodgeOffset && ((isOptimum ? dodgeOffset : isLift ? requiredLift : 0) || 0);
+    const extraLift = (dodgeOffset || isLiftAlways) &&
+        ((isOptimum ? dodgeOffset : isLift ? requiredLift : 0) || 0);
 
     snapPoints = snapPoints.map(v => v + extraLift);
+    const snapPointsKey = `${snapPoints}`;
     // console.log('sheetLifing:', { extraLift, dodgeOffset, requiredLift, initSnapPoints: `${initSnapPoints}`, snapPoints: `${snapPoints}` });
     const MAX_HEIGHT = snapPoints.slice(-1)[0];
+    const MODAL_HEIGHT = snapPoints.slice(-1)[0] - snapPoints[0];
 
-    const snapTranslateValues = useMemo(() => snapPoints.map(h => MAX_HEIGHT - h), snapPoints);
+    const snapTranslateValues = useMemo(() => snapPoints.map(h => MAX_HEIGHT - h), [snapPointsKey]);
 
     const translateY = useAnimatedValue(snapTranslateValues[initialSnapIndex]);
 
@@ -91,21 +102,39 @@ const SnapSheet = forwardRef(function SnapSheet({
         } else setRequiredLift(0);
     }
 
-    useEffect(updateKeyboardOffset, [dodgeOffset, ...initSnapPoints]);
+    useEffect(updateKeyboardOffset, [dodgeOffset, `${initSnapPoints}`]);
+
+    useEffect(() => {
+        if (!isLiftAlways) return;
+
+        const frameListener = Keyboard.addListener('keyboardDidChangeFrame', updateKeyboardOffset);
+        const showListener = Keyboard.addListener('keyboardDidShow', updateKeyboardOffset);
+        const hiddenListener = Keyboard.addListener('keyboardDidHide', updateKeyboardOffset);
+
+        return () => {
+            frameListener.remove();
+            showListener.remove();
+            hiddenListener.remove();
+        }
+    }, [isLiftAlways]);
 
     const getCurrentSnap = (draggingUpward) => {
-        const shownHeight = MAX_HEIGHT - translateY._value;
+        const shownHeight = MODAL_HEIGHT - translateY._value;
         const currentSnapIndex = draggingUpward ? snapPoints.findIndex((v, i, a) => v <= shownHeight && (i === a.length - 1 || shownHeight < a[i + 1]))
             : snapPoints.findIndex((v, i, a) => v >= shownHeight && (!i || shownHeight > a[i - 1]));
 
         return currentSnapIndex;
     }
 
-    const snapToIndex = (index, force, velocity, onFinish) => {
+    const snapToIndex = useRef();
+
+    snapToIndex.current = (index, force, velocity, onFinish) => {
         if (disabled && !force) return;
 
         if (!Number.isInteger(index) || index < 0 || index > snapPoints.length - 1)
             throw new Error(`invalid snap index:${index}, index must be within range 0 - ${snapPoints.length - 1}`);
+
+        if (index < minSnapIndex) index = minSnapIndex;
 
         const newY = snapTranslateValues[index];
 
@@ -148,13 +177,13 @@ const SnapSheet = forwardRef(function SnapSheet({
 
     useImperativeHandle(ref, () => ({
         snap: index => {
-            snapToIndex(index, true);
+            snapToIndex.current(index, true);
         }
-    }), snapPoints);
+    }));
 
     useEffect(() => {
-        snapToIndex(Math.min(lastSnapIndex.current, snapPoints.length - 1), true);
-    }, snapPoints);
+        snapToIndex.current(Math.min(lastSnapIndex.current, snapPoints.length - 1), true);
+    }, [snapPointsKey]);
 
     const panResponder = useMemo(() => {
 
@@ -178,8 +207,7 @@ const SnapSheet = forwardRef(function SnapSheet({
             onPanResponderMove: (_, gesture) => {
                 const newY = gesture.dy + lastOffset.current;
 
-                if (newY < 0) return; // prevent overscrolling upward
-                if (newY > MAX_HEIGHT) return;
+                if (newY < snapPoints[__loosenMinSnap ? 0 : minSnapIndex] || newY > MODAL_HEIGHT) return;
 
                 translateY.setValue(newY);
             },
@@ -196,7 +224,7 @@ const SnapSheet = forwardRef(function SnapSheet({
                             vy > 0.3 ? 0 : currentSnapIndex;
                 const willFullyShow = newSnapIndex === snapPoints.length - 1;
 
-                snapToIndex(newSnapIndex, true, draggingUpward ? vy : undefined);
+                snapToIndex.current(newSnapIndex, true, draggingUpward ? vy : undefined);
 
                 // Only scroll if there was a fling velocity upward
                 if (inheritScrollVelocityOnExpand && willFullyShow && vy < -0.1) {
@@ -214,7 +242,7 @@ const SnapSheet = forwardRef(function SnapSheet({
                 }
             }
         });
-    }, [!disabled, ...snapPoints]);
+    }, [!disabled, snapPointsKey, minSnapIndex]);
 
     const conStyle = useMemo(() => ({
         position: "absolute",
@@ -224,12 +252,11 @@ const SnapSheet = forwardRef(function SnapSheet({
         borderTopRightRadius: 25,
         zIndex: 1,
         ...StyleSheet.flatten(style),
-        bottom: 0,
-        height: MAX_HEIGHT,
+        bottom: snapPoints[0],
+        height: MODAL_HEIGHT,
         transform: [{ translateY }]
-    }), [MAX_HEIGHT, style]);
+    }), [snapPointsKey, style]);
 
-    useEffect(() => updatePrefferAnchor, [currentAnchorId]);
     const updateAnchorReducer = useRef();
 
     const scheduleAnchorUpdate = (timeout = 100) => {
@@ -242,6 +269,7 @@ const SnapSheet = forwardRef(function SnapSheet({
         const directAnchor = rankedAnchors.find(v => v[1].anchorId === currentAnchorId);
         setPrefferedAnchor(directAnchor?.[0]);
     }
+    useEffect(updatePrefferAnchor, [currentAnchorId]);
 
     const onAnchorScroll = (e, instanceId) => {
         const scrollY = e.nativeEvent.contentOffset.y;
@@ -273,7 +301,7 @@ const SnapSheet = forwardRef(function SnapSheet({
 
             const currentSnapIndex = getCurrentSnap(false);
             const newSnapIndex = snapWhileDecelerating ? Math.max(0, currentSnapIndex - 1) : 0;
-            snapToIndex(newSnapIndex, false, -scrollVelocity);
+            snapToIndex.current(newSnapIndex, false, -scrollVelocity);
         }
     }
 

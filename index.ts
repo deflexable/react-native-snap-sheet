@@ -60,7 +60,8 @@ export interface SnapSheetBaseProps {
      * Behaviour for avoiding keyboard overlap
      * - "off" → disables keyboard dodging
      * - "optimum" → intelligently lift only needed amount
-     * - "whole" → move entire sheet above keyboard
+     * - "whole" → move entire sheet above keyboard only when an input element requires dodging
+     * - "whole-always" → alway move entire sheet above keyboard when the keyboard is opened
      * 
      * `react-native-dodge-keyboard` is used for keyboard dodging and automatic tag detection for scrollable and input components.
      *
@@ -81,7 +82,7 @@ export interface SnapSheetBaseProps {
      * 
      * @default 'optimum'
      */
-    keyboardDodgingBehaviour?: "off" | "optimum" | "whole";
+    keyboardDodgingBehaviour?: "off" | "optimum" | "whole" | "whole-always";
 
     /**
      * Additional offset to add when dodging keyboard
@@ -103,6 +104,15 @@ export interface SnapSheetProps extends SnapSheetBaseProps {
      * @default 0
      */
     initialSnapIndex?: number;
+
+    /**
+     * The lowest snap point the sheet can attain.
+     * 
+     * This is useful in preventing the sheet from completing closing
+     * 
+     * @default 0
+     */
+    minSnapIndex?: number;
 
     /**
      * Disable user interactions on the snap sheet

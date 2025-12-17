@@ -222,6 +222,7 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
                 }}>
                 <SnapSheet
                     {...restProps}
+                    minSnapIndex={0}
                     ref={sheetRef}
                     snapPoints={snapPoints}
                     {...hasClosed ? { keyboardDodgingBehaviour: 'off' } : {}}
