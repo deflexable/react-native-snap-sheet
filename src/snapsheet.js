@@ -1,16 +1,16 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { Animated, Keyboard, PanResponder, StyleSheet, useAnimatedValue, View } from "react-native";
-import DodgeKeyboard, { ReactHijacker } from "react-native-dodge-keyboard";
-import { doRendable, isNumber } from "./utils";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, cloneElement } from "react";
+import { Animated, PanResponder, StyleSheet, useAnimatedValue, View } from "react-native";
+import DodgeKeyboard, { createHijackedElement, ReactHijacker, __HijackNode } from "react-native-dodge-keyboard";
+import { doRendable, isNumber, isPositiveNumber } from "./utils";
 import { styling } from "./styling";
 
 const PixelRate = 70 / 100; // 70ms to 100 pixels
+const CheckFocusedNode = '__fakeSnapSheetFocused';
 
 const SnapSheet = forwardRef(function SnapSheet({
     snapPoints = [],
     initialSnapIndex = 0,
     minSnapIndex = 0,
-    __loosenMinSnap,
     onSnapIndex,
     onSnapFinish,
     snapWhileDecelerating = false,
@@ -20,18 +20,17 @@ const SnapSheet = forwardRef(function SnapSheet({
     renderHandle,
     handleColor,
     keyboardDodgingBehaviour = 'optimum',
-    keyboardDodgingOffset = 10,
+    keyboardDodgingOffset,
     children,
     disabled,
     currentAnchorId,
-    __shaky_sheet
+    __checkIfElementIsFocused,
+    __loosenMinSnap
 }, ref) {
-    const isLiftAlways = keyboardDodgingBehaviour === 'whole-always';
-    const isLift = isLiftAlways || keyboardDodgingBehaviour === 'whole';
-    const isOptimum = keyboardDodgingBehaviour === 'optimum';
+    const isLift = keyboardDodgingBehaviour === 'whole';
 
-    if (!['optimum', 'whole', 'whole-always', 'off'].includes(keyboardDodgingBehaviour))
-        throw `keyboardDodgingBehaviour must be any of ${['optimum', 'whole', 'whole-always', 'off']} but got ${keyboardDodgingBehaviour}`;
+    if (!['optimum', 'whole', 'off'].includes(keyboardDodgingBehaviour))
+        throw `keyboardDodgingBehaviour must be any of ${['optimum', 'whole', 'off']} but got ${keyboardDodgingBehaviour}`;
 
     if (snapPoints.length < 2) throw new Error('snapPoints must have at least two items');
     snapPoints.forEach((v, i, a) => {
@@ -50,25 +49,50 @@ const SnapSheet = forwardRef(function SnapSheet({
     if (minSnapIndex >= snapPoints.length) throw new Error(`minSnapIndex is out of range`);
     initialSnapIndex = Math.max(initialSnapIndex, minSnapIndex);
 
+    if (__checkIfElementIsFocused !== undefined && typeof __checkIfElementIsFocused !== 'function')
+        throw `expected '__checkIfElementIsFocused' to be a function but got ${__checkIfElementIsFocused}`;
+
+    if (isLift) {
+        const realChecker = __checkIfElementIsFocused;
+        __checkIfElementIsFocused = (r, refs) => {
+            return !!r?.[CheckFocusedNode] && refs.some(v => realChecker ? realChecker?.(v) : v?.isFocused?.());
+        };
+        if (keyboardDodgingOffset === undefined) {
+            keyboardDodgingOffset = 0;
+        }
+    } else if (keyboardDodgingOffset === undefined) {
+        keyboardDodgingOffset = 10;
+    }
+
+    const flattenStyle = StyleSheet.flatten(style) || {};
     const initSnapPoints = snapPoints;
 
     const [scrollEnabled, setScrollEnabled] = useState(false);
     const [dodgeOffset, setDodgeOffset] = useState(0);
-    const [requiredLift, setRequiredLift] = useState(0);
     const [currentIndex, setCurrentIndex] = useState(initialSnapIndex);
     const [finishedIndex, setFinishedIndex] = useState(initialSnapIndex);
     const [prefferedAnchor, setPrefferedAnchor] = useState();
 
-    const extraLift = (dodgeOffset || isLiftAlways) &&
-        ((isOptimum ? dodgeOffset : isLift ? requiredLift : 0) || 0);
-
-    snapPoints = snapPoints.map(v => v + extraLift);
+    snapPoints = snapPoints.map(v => v + dodgeOffset);
     const snapPointsKey = `${snapPoints}`;
-    // console.log('sheetLifing:', { extraLift, dodgeOffset, requiredLift, initSnapPoints: `${initSnapPoints}`, snapPoints: `${snapPoints}` });
-    const MAX_HEIGHT = snapPoints.slice(-1)[0];
-    const MODAL_HEIGHT = snapPoints.slice(-1)[0] - snapPoints[0];
 
-    const snapTranslateValues = useMemo(() => snapPoints.map(h => MAX_HEIGHT - h), [snapPointsKey]);
+    const fixHeight =
+        (isPositiveNumber(flattenStyle.minHeight) && isPositiveNumber(flattenStyle.height))
+            ? Math.max(flattenStyle.minHeight, flattenStyle.height)
+            : flattenStyle.height;
+    const fixMaxHeight = flattenStyle.maxHeight;
+
+    const PotentialHeight =
+        (isPositiveNumber(fixHeight) && isPositiveNumber(fixMaxHeight))
+            ? Math.min(fixHeight, fixMaxHeight)
+            : fixHeight;
+    // console.log('sheetLifing:', { extraLift, dodgeOffset, requiredLift, initSnapPoints: `${initSnapPoints}`, snapPoints: `${snapPoints}` });
+    const MODAL_HEIGHT =
+        isPositiveNumber(PotentialHeight)
+            ? PotentialHeight
+            : snapPoints.slice(-1)[0] - snapPoints[0];
+
+    const snapTranslateValues = useMemo(() => snapPoints.map(h => MODAL_HEIGHT - h), [snapPointsKey]);
 
     const translateY = useAnimatedValue(snapTranslateValues[initialSnapIndex]);
 
@@ -78,7 +102,6 @@ const SnapSheet = forwardRef(function SnapSheet({
     const scrollRefObj = useRef({});
     const lastOffset = useRef(translateY._value);
     const lastSnapIndex = useRef(initialSnapIndex);
-    const bottomFakePlaceholderRef = useRef();
     const instantPrefferAnchor = useRef();
     instantPrefferAnchor.current = prefferedAnchor;
 
@@ -87,36 +110,6 @@ const SnapSheet = forwardRef(function SnapSheet({
 
     const instantScrollEnabled = useRef(scrollEnabled);
     instantScrollEnabled.current = scrollEnabled;
-
-    const updateKeyboardOffset = () => {
-        if (!isLift) {
-            setRequiredLift(0);
-            return;
-        }
-        const keyboardInfo = Keyboard.metrics();
-        if (keyboardInfo?.height && keyboardInfo.screenY) {
-            bottomFakePlaceholderRef.current.measureInWindow((x, y) => {
-                const remains = y - keyboardInfo.screenY;
-                setRequiredLift(Math.max(0, remains));
-            });
-        } else setRequiredLift(0);
-    }
-
-    useEffect(updateKeyboardOffset, [dodgeOffset, `${initSnapPoints}`]);
-
-    useEffect(() => {
-        if (!isLiftAlways) return;
-
-        const frameListener = Keyboard.addListener('keyboardDidChangeFrame', updateKeyboardOffset);
-        const showListener = Keyboard.addListener('keyboardDidShow', updateKeyboardOffset);
-        const hiddenListener = Keyboard.addListener('keyboardDidHide', updateKeyboardOffset);
-
-        return () => {
-            frameListener.remove();
-            showListener.remove();
-            hiddenListener.remove();
-        }
-    }, [isLiftAlways]);
 
     const getCurrentSnap = (draggingUpward) => {
         const shownHeight = MODAL_HEIGHT - translateY._value;
@@ -138,9 +131,6 @@ const SnapSheet = forwardRef(function SnapSheet({
 
         const newY = snapTranslateValues[index];
 
-        if (__shaky_sheet && lastOffset.current !== newY)
-            translateY.setValue(lastOffset.current);
-
         const prevY = translateY._value;
         setScrollEnabled(index === snapPoints.length - 1);
         setCurrentIndex(index);
@@ -158,7 +148,7 @@ const SnapSheet = forwardRef(function SnapSheet({
 
         const timer = setTimeout(guessFinish, Math.max(300, timeout));
 
-        // console.log('snapTimer:', { timeout, pixel });
+        // console.log('snapTimer:', { timeout, pixel }, ' newY:', newY, ' snapPoint:', initSnapPoints, ' snapTrans:', snapTranslateValues);
 
         Animated.spring(translateY, {
             velocity,
@@ -207,7 +197,10 @@ const SnapSheet = forwardRef(function SnapSheet({
             onPanResponderMove: (_, gesture) => {
                 const newY = gesture.dy + lastOffset.current;
 
-                if (newY < snapPoints[__loosenMinSnap ? 0 : minSnapIndex] || newY > MODAL_HEIGHT) return;
+                if (
+                    newY > snapTranslateValues[__loosenMinSnap ? 0 : minSnapIndex] ||
+                    newY < snapTranslateValues.slice(-1)[0]
+                ) return;
 
                 translateY.setValue(newY);
             },
@@ -244,18 +237,19 @@ const SnapSheet = forwardRef(function SnapSheet({
         });
     }, [!disabled, snapPointsKey, minSnapIndex]);
 
-    const conStyle = useMemo(() => ({
-        position: "absolute",
-        width: "100%",
-        backgroundColor: "#fff",
-        borderTopLeftRadius: 25,
-        borderTopRightRadius: 25,
-        zIndex: 1,
-        ...StyleSheet.flatten(style),
-        bottom: snapPoints[0],
-        height: MODAL_HEIGHT,
-        transform: [{ translateY }]
-    }), [snapPointsKey, style]);
+    const conStyle = useMemo(() => {
+        const { height, minHeight, maxHeight, ...rest } = flattenStyle;
+
+        return {
+            backgroundColor: "#fff",
+            borderTopLeftRadius: 25,
+            borderTopRightRadius: 25,
+            zIndex: 1,
+            height: (Object.hasOwn(flattenStyle, 'height') && height === undefined) ? undefined : MODAL_HEIGHT,
+            ...rest,
+            transform: [{ translateY }]
+        };
+    }, [snapPointsKey, style]);
 
     const updateAnchorReducer = useRef();
 
@@ -313,47 +307,79 @@ const SnapSheet = forwardRef(function SnapSheet({
     const disableDodging = keyboardDodgingBehaviour === 'off';
     const sameIndex = currentIndex === finishedIndex;
 
+    const instanceIdIterator = useRef(0);
+    const prevKE = useRef();
+
+    const quicklyDodgeKeyboard = (offset, keyboardEvent) => {
+        // console.log('quicklyDodgeKeyboard offset:', offset, ' keyboardEvent:', keyboardEvent);
+        if (!keyboardEvent) {
+            if (!(keyboardEvent = prevKE.current)) return;
+        }
+        if (keyboardEvent.endCoordinates.height) {
+            prevKE.current = keyboardEvent;
+        } else {
+            if (prevKE.current) keyboardEvent = prevKE.current;
+        }
+
+        const newPosY = MODAL_HEIGHT - (initSnapPoints[lastSnapIndex.current] + offset);
+        const newDuration = (Math.abs(newPosY - translateY._value) * keyboardEvent.duration) / keyboardEvent?.endCoordinates.height;
+
+        // console.log('newPosY:', newPosY, ' timing newDuration:', newDuration);
+        Animated.timing(translateY, {
+            duration: newDuration || 0,
+            toValue: newPosY,
+            useNativeDriver: true
+        }).start();
+    }
+
     return (
         <View style={styling.absoluteFill}>
-            <Animated.View
-                style={conStyle}
-                {...panResponder.panHandlers}>
-                {doRendable?.(
-                    renderHandle,
-                    <View style={styling.modalHandle}>
-                        <View style={handleDotStyle} />
-                    </View>
-                )}
-                <View style={styling.flexer}>
-                    <DodgeKeyboard
-                        offset={keyboardDodgingOffset}
-                        disabled={!sameIndex || disableDodging}
-                        onHandleDodging={({ liftUp }) => {
-                            setDodgeOffset(liftUp);
-                        }}>
-                        {ReactHijacker({
-                            children,
-                            doHijack: (node, path) => {
-                                if (node?.props?.['snap_sheet_scan_off']) return { element: node };
+            <View style={{ position: 'absolute', bottom: 0, width: '100%' }}>
+                <Animated.View
+                    style={conStyle}
+                    {...panResponder.panHandlers}>
+                    {doRendable?.(
+                        renderHandle,
+                        <View style={styling.modalHandle}>
+                            <View style={handleDotStyle} />
+                        </View>
+                    )}
+                    <View style={styling.flexer}>
+                        <DodgeKeyboard
+                            offset={keyboardDodgingOffset}
+                            disabled={!sameIndex || disableDodging}
+                            checkIfElementIsFocused={__checkIfElementIsFocused}
+                            onHandleDodging={({ liftUp, keyboardEvent }) => {
+                                quicklyDodgeKeyboard(liftUp, keyboardEvent);
+                                setDodgeOffset(liftUp);
+                            }}>
+                            {ReactHijacker({
+                                children,
+                                enableLocator: true,
+                                doHijack: (node, path) => {
+                                    if (node?.props?.snap_sheet_scan_off || node?.props?.__checking_snap_scrollable)
+                                        return createHijackedElement(node);
 
-                                if (isScrollable(node)) {
-                                    const instanceId = path.join(',');
+                                    if (!isScrollable(node)) return;
 
-                                    const initNode = () => {
-                                        if (!scrollRefObj.current[instanceId])
-                                            scrollRefObj.current[instanceId] = { scrollY: 0, location: path };
-                                        const thisAnchorId = node.props?.snap_sheet_scroll_anchor;
+                                    const renderer = () => {
+                                        const instanceId = useMemo(() => `${++instanceIdIterator.current}`, []);
 
-                                        if (scrollRefObj.current[instanceId].anchorId !== thisAnchorId) {
-                                            scheduleAnchorUpdate(300);
+                                        const initNode = () => {
+                                            if (!scrollRefObj.current[instanceId])
+                                                scrollRefObj.current[instanceId] = { scrollY: 0, location: path };
+                                            const thisAnchorId = node.props?.snap_sheet_scroll_anchor;
+
+                                            if (scrollRefObj.current[instanceId].anchorId !== thisAnchorId) {
+                                                scheduleAnchorUpdate(300);
+                                            }
+                                            scrollRefObj.current[instanceId].anchorId = thisAnchorId;
                                         }
-                                        scrollRefObj.current[instanceId].anchorId = thisAnchorId;
-                                    }
-                                    initNode();
+                                        initNode();
 
-                                    return {
-                                        props: {
+                                        const newProps = {
                                             ...node?.props,
+                                            __checking_snap_scrollable: true,
                                             ...disableDodging ? {} : { ['dodge_keyboard_scrollable']: true },
                                             ref: r => {
                                                 if (r) {
@@ -375,19 +401,32 @@ const SnapSheet = forwardRef(function SnapSheet({
                                                 onAnchorScroll(e, instanceId);
                                                 return node.props?.onScroll?.(e);
                                             }
-                                        }
+                                        };
+
+                                        return cloneElement(node, newProps);
                                     }
+
+                                    return createHijackedElement(
+                                        <__HijackNode>
+                                            {renderer}
+                                        </__HijackNode>
+                                    );
                                 }
-                            }
-                        })}
-                    </DodgeKeyboard>
-                </View>
-            </Animated.View>
-            {isLift ?
-                <View
-                    ref={bottomFakePlaceholderRef}
-                    style={styling.fakePlaceholder}
-                    onLayout={updateKeyboardOffset} /> : null}
+                            })}
+                            {isLift ?
+                                <View
+                                    ref={r => {
+                                        if (r) {
+                                            r[CheckFocusedNode] = true;
+                                        }
+                                    }}
+                                    dodge_keyboard_input
+                                    style={styling.fakePlaceholder}
+                                /> : null}
+                        </DodgeKeyboard>
+                    </View>
+                </Animated.View>
+            </View>
         </View>
     );
 });

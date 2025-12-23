@@ -60,8 +60,7 @@ export interface SnapSheetBaseProps {
      * Behaviour for avoiding keyboard overlap
      * - "off" → disables keyboard dodging
      * - "optimum" → intelligently lift only needed amount
-     * - "whole" → move entire sheet above keyboard only when an input element requires dodging
-     * - "whole-always" → alway move entire sheet above keyboard when the keyboard is opened
+     * - "whole" → move entire sheet above keyboard
      * 
      * `react-native-dodge-keyboard` is used for keyboard dodging and automatic tag detection for scrollable and input components.
      *
@@ -82,12 +81,12 @@ export interface SnapSheetBaseProps {
      * 
      * @default 'optimum'
      */
-    keyboardDodgingBehaviour?: "off" | "optimum" | "whole" | "whole-always";
+    keyboardDodgingBehaviour?: "off" | "optimum" | "whole";
 
     /**
      * Additional offset to add when dodging keyboard
      * 
-     * @default 10
+     * default to `0` if `keyboardDodgingBehaviour` is "whole" otherwise, it defaults to `10`
      */
     keyboardDodgingOffset?: number;
 }
