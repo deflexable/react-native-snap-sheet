@@ -309,15 +309,15 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
         const flatStyle = StyleSheet.flatten(containerStyle);
 
         return {
+            zIndex: hasClosed ? -99 : 9999,
+            elevation: hasClosed ? 0 : 9999,
+            ...hasClosed ? { opacity: 0, display: 'none' } : {},
             ...flatStyle,
             position: 'absolute',
             width: '100%',
             height: '100%',
             top: 0,
-            left: 0,
-            zIndex: hasClosed ? -99 : isNumber(flatStyle?.zIndex) ? flatStyle?.zIndex : 9999,
-            elevation: hasClosed ? 0 : isNumber(flatStyle?.elevation) ? flatStyle?.elevation : 9999,
-            ...hasClosed ? { opacity: 0 } : {}
+            left: 0
         };
     }, [containerStyle, hasClosed]);
 

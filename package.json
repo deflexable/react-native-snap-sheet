@@ -19,7 +19,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "react-native-dodge-keyboard": "^1.0.3",
+    "react-native-dodge-keyboard": "^1.0.4",
     "react-native-push-back": "^1.0.0"
   }
 }
