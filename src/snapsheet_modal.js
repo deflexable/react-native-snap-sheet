@@ -311,7 +311,7 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
         return {
             zIndex: hasClosed ? -99 : 9999,
             elevation: hasClosed ? 0 : 9999,
-            ...hasClosed ? { opacity: 0, display: 'none' } : {},
+            ...hasClosed ? { opacity: 0 } : {},
             ...flatStyle,
             position: 'absolute',
             width: '100%',

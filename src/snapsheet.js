@@ -172,7 +172,7 @@ const SnapSheet = forwardRef(function SnapSheet({
     }));
 
     useEffect(() => {
-        snapToIndex.current(Math.min(lastSnapIndex.current, snapPoints.length - 1), true);
+        if (!isLifting.current) snapToIndex.current(Math.min(lastSnapIndex.current, snapPoints.length - 1), true);
     }, [snapPointsKey]);
 
     const panResponder = useMemo(() => {
@@ -309,11 +309,17 @@ const SnapSheet = forwardRef(function SnapSheet({
 
     const instanceIdIterator = useRef(0);
     const prevKE = useRef();
+    const prevLiftOffset = useRef(0);
+    const isLifting = useRef();
 
     const quicklyDodgeKeyboard = (offset, keyboardEvent) => {
         // console.log('quicklyDodgeKeyboard offset:', offset, ' keyboardEvent:', keyboardEvent);
+
         if (!keyboardEvent) {
-            if (!(keyboardEvent = prevKE.current)) return;
+            if (!(keyboardEvent = prevKE.current)) {
+                prevLiftOffset.current = offset;
+                return;
+            }
         }
         if (keyboardEvent.endCoordinates.height) {
             prevKE.current = keyboardEvent;
@@ -321,15 +327,24 @@ const SnapSheet = forwardRef(function SnapSheet({
             if (prevKE.current) keyboardEvent = prevKE.current;
         }
 
+        if (prevLiftOffset.current === offset) return;
+        prevLiftOffset.current = offset;
+
         const newPosY = MODAL_HEIGHT - (initSnapPoints[lastSnapIndex.current] + offset);
         const newDuration = (Math.abs(newPosY - translateY._value) * keyboardEvent.duration) / keyboardEvent?.endCoordinates.height;
 
         // console.log('newPosY:', newPosY, ' timing newDuration:', newDuration);
+        isLifting.current = true;
         Animated.timing(translateY, {
-            duration: newDuration || 0,
+            duration: Math.max((newDuration || 0) - 70, 0),
             toValue: newPosY,
-            useNativeDriver: true
-        }).start();
+            useNativeDriver: false
+        }).start(() => {
+            if (offset === prevLiftOffset.current) {
+                isLifting.current = false;
+                setDodgeOffset(offset);
+            }
+        });
     }
 
     return (
@@ -351,7 +366,6 @@ const SnapSheet = forwardRef(function SnapSheet({
                             checkIfElementIsFocused={__checkIfElementIsFocused}
                             onHandleDodging={({ liftUp, keyboardEvent }) => {
                                 quicklyDodgeKeyboard(liftUp, keyboardEvent);
-                                setDodgeOffset(liftUp);
                             }}>
                             {ReactHijacker({
                                 children,
