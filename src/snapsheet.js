@@ -309,40 +309,40 @@ const SnapSheet = forwardRef(function SnapSheet({
 
     const instanceIdIterator = useRef(0);
     const prevKE = useRef();
-    const prevLiftOffset = useRef(0);
     const isLifting = useRef();
+    const lastLiftInstance = useRef(0);
 
-    const quicklyDodgeKeyboard = (offset, keyboardEvent) => {
-        // console.log('quicklyDodgeKeyboard offset:', offset, ' keyboardEvent:', keyboardEvent);
+    const quicklyDodgeKeyboard = async (event) => {
+        let { liftUp, keyboardEvent } = event;
+        // console.log('quicklyDodgeKeyboard event:', event);
 
         if (!keyboardEvent) {
-            if (!(keyboardEvent = prevKE.current)) {
-                prevLiftOffset.current = offset;
-                return;
-            }
+            if (!(keyboardEvent = prevKE.current)) return;
         }
         if (keyboardEvent.endCoordinates.height) {
             prevKE.current = keyboardEvent;
         } else {
             if (prevKE.current) keyboardEvent = prevKE.current;
         }
+        const thisRef = ++lastLiftInstance.current;
 
-        if (prevLiftOffset.current === offset) return;
-        prevLiftOffset.current = offset;
+        const kh = keyboardEvent?.endCoordinates?.height || 0;
+        const realSnapPoint = initSnapPoints[lastSnapIndex.current];
 
-        const newPosY = MODAL_HEIGHT - (initSnapPoints[lastSnapIndex.current] + offset);
-        const newDuration = (Math.abs(newPosY - translateY._value) * keyboardEvent.duration) / keyboardEvent?.endCoordinates.height;
+        const newY = liftUp ? translateY._value - liftUp : (MODAL_HEIGHT - realSnapPoint);
+        const newDodgeOffset = (MODAL_HEIGHT - newY) - realSnapPoint;
+        const newDuration = kh > 0 ? (Math.min(Math.abs(liftUp), kh) / kh) * keyboardEvent.duration : 0;
 
-        // console.log('newPosY:', newPosY, ' timing newDuration:', newDuration);
+        // console.log('newPosY:', newY, ' timing newDuration:', newDuration, ' newDodgeOffset:', newDodgeOffset);
         isLifting.current = true;
         Animated.timing(translateY, {
             duration: Math.max((newDuration || 0) - 70, 0),
-            toValue: newPosY,
-            useNativeDriver: false
+            toValue: newY,
+            useNativeDriver: true
         }).start(() => {
-            if (offset === prevLiftOffset.current) {
+            if (thisRef === lastLiftInstance.current) {
                 isLifting.current = false;
-                setDodgeOffset(offset);
+                setDodgeOffset(newDodgeOffset);
             }
         });
     }
@@ -364,9 +364,7 @@ const SnapSheet = forwardRef(function SnapSheet({
                             offset={keyboardDodgingOffset}
                             disabled={!sameIndex || disableDodging}
                             checkIfElementIsFocused={__checkIfElementIsFocused}
-                            onHandleDodging={({ liftUp, keyboardEvent }) => {
-                                quicklyDodgeKeyboard(liftUp, keyboardEvent);
-                            }}>
+                            onHandleDodging={quicklyDodgeKeyboard}>
                             {ReactHijacker({
                                 children,
                                 enableLocator: true,
@@ -435,6 +433,7 @@ const SnapSheet = forwardRef(function SnapSheet({
                                         }
                                     }}
                                     dodge_keyboard_input
+                                    dodge_keyboard_clipping
                                     style={styling.fakePlaceholder}
                                 /> : null}
                         </DodgeKeyboard>

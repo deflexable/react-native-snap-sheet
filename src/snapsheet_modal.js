@@ -256,7 +256,9 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
                         ...isLift ? {
                             __checkIfElementIsFocused: (r, refs) => {
                                 const realChecker = restProps?.__checkIfElementIsFocused;
-                                return !!r?.[CheckFocusedNode] && refs.some(v => realChecker ? realChecker?.(v) : v?.isFocused?.());
+                                return !!r?.[CheckFocusedNode] &&
+                                    !willClose &&
+                                    refs.some(v => realChecker ? realChecker?.(v) : v?.isFocused?.());
                             },
                             keyboardDodgingBehaviour: 'optimum'
                         } : {}
@@ -298,6 +300,7 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
                                         }
                                     }}
                                     dodge_keyboard_input
+                                    dodge_keyboard_clipping
                                     style={styling.fakePlaceholder}
                                 /> : null}
                         </View>}
