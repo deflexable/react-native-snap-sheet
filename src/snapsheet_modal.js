@@ -78,6 +78,7 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
     useMemo(makeSizingPromise, []);
 
     const sizingReady = !centered || (contentHeight !== undefined && viewHeight !== undefined);
+    const hasClosed = futureState === 'closed' && currentState === 'closed';
 
     useEffect(() => {
         if (sizingReady) {
@@ -103,7 +104,6 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
 
     const willClose = futureState === 'closed';
     const isOpened = futureState !== 'closed';
-    const hasClosed = futureState === 'closed' && currentState === 'closed';
 
     const sheetRef = useRef();
     const inputRefs = useRef({});
@@ -179,7 +179,7 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
                 onClosed?.();
             } else onOpened?.();
         hasMountOpened.current = true;
-    }, [hasClosed]);
+    }, [futureState, currentState]);
 
     useBackButton(() => {
         snapModal.current(0);
@@ -258,7 +258,7 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
                                 const realChecker = restProps?.__checkIfElementIsFocused;
                                 return !!r?.[CheckFocusedNode] &&
                                     !willClose &&
-                                    refs.some(v => realChecker ? realChecker?.(v) : v?.isFocused?.());
+                                    refs.some(v => realChecker ? realChecker?.(v, refs) : v?.isFocused?.());
                             },
                             keyboardDodgingBehaviour: 'optimum'
                         } : {}

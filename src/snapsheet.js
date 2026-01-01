@@ -55,7 +55,7 @@ const SnapSheet = forwardRef(function SnapSheet({
     if (isLift) {
         const realChecker = __checkIfElementIsFocused;
         __checkIfElementIsFocused = (r, refs) => {
-            return !!r?.[CheckFocusedNode] && refs.some(v => realChecker ? realChecker?.(v) : v?.isFocused?.());
+            return !!r?.[CheckFocusedNode] && refs.some(v => realChecker ? realChecker?.(v, refs) : v?.isFocused?.());
         };
         if (keyboardDodgingOffset === undefined) {
             keyboardDodgingOffset = 0;
@@ -69,8 +69,6 @@ const SnapSheet = forwardRef(function SnapSheet({
 
     const [scrollEnabled, setScrollEnabled] = useState(false);
     const [dodgeOffset, setDodgeOffset] = useState(0);
-    const [currentIndex, setCurrentIndex] = useState(initialSnapIndex);
-    const [finishedIndex, setFinishedIndex] = useState(initialSnapIndex);
     const [prefferedAnchor, setPrefferedAnchor] = useState();
 
     snapPoints = snapPoints.map(v => v + dodgeOffset);
@@ -100,6 +98,7 @@ const SnapSheet = forwardRef(function SnapSheet({
      * @type {import("react").RefObject<{[key: string]: { ref: import('react-native').ScrollView, scrollY: 0, location: number[], anchorId: boolean }}>}
      */
     const scrollRefObj = useRef({});
+    const dodgeRef = useRef();
     const lastOffset = useRef(translateY._value);
     const lastSnapIndex = useRef(initialSnapIndex);
     const instantPrefferAnchor = useRef();
@@ -120,6 +119,9 @@ const SnapSheet = forwardRef(function SnapSheet({
     }
 
     const snapToIndex = useRef();
+    const stillSnapping = useRef();
+    const lastSnappingInstance = useRef(0);
+    const shouldRefreshDodge = useRef();
 
     snapToIndex.current = (index, force, velocity, onFinish) => {
         if (disabled && !force) return;
@@ -133,7 +135,6 @@ const SnapSheet = forwardRef(function SnapSheet({
 
         const prevY = translateY._value;
         setScrollEnabled(index === snapPoints.length - 1);
-        setCurrentIndex(index);
 
         // console.log('snapping:', index);
         let wasFinished;
@@ -147,6 +148,8 @@ const SnapSheet = forwardRef(function SnapSheet({
         const timeout = pixel * PixelRate;
 
         const timer = setTimeout(guessFinish, Math.max(300, timeout));
+        const thisRef = ++lastSnappingInstance.current;
+        stillSnapping.current = true;
 
         // console.log('snapTimer:', { timeout, pixel }, ' newY:', newY, ' snapPoint:', initSnapPoints, ' snapTrans:', snapTranslateValues);
 
@@ -156,8 +159,16 @@ const SnapSheet = forwardRef(function SnapSheet({
             useNativeDriver: true
         }).start(() => {
             clearTimeout(timer);
-            setFinishedIndex(index);
             guessFinish();
+            if (thisRef === lastSnappingInstance.current) {
+                requestIdleCallback(() => {
+                    stillSnapping.current = false;
+                    if (shouldRefreshDodge.current) {
+                        isLifting.current = false;
+                        dodgeRef.current.trigger();
+                    }
+                }, { timeout: 700 });
+            }
         });
 
         lastOffset.current = newY;
@@ -305,7 +316,6 @@ const SnapSheet = forwardRef(function SnapSheet({
     }), [handleColor]);
 
     const disableDodging = keyboardDodgingBehaviour === 'off';
-    const sameIndex = currentIndex === finishedIndex;
 
     const instanceIdIterator = useRef(0);
     const prevKE = useRef();
@@ -324,6 +334,16 @@ const SnapSheet = forwardRef(function SnapSheet({
         } else {
             if (prevKE.current) keyboardEvent = prevKE.current;
         }
+        isLifting.current = true;
+        if (stillSnapping.current) {
+            if (!liftUp) {
+                isLifting.current = false;
+                setDodgeOffset(0);
+                return;
+            }
+            shouldRefreshDodge.current = true;
+            return;
+        }
         const thisRef = ++lastLiftInstance.current;
 
         const kh = keyboardEvent?.endCoordinates?.height || 0;
@@ -334,7 +354,6 @@ const SnapSheet = forwardRef(function SnapSheet({
         const newDuration = kh > 0 ? (Math.min(Math.abs(liftUp), kh) / kh) * keyboardEvent.duration : 0;
 
         // console.log('newPosY:', newY, ' timing newDuration:', newDuration, ' newDodgeOffset:', newDodgeOffset);
-        isLifting.current = true;
         Animated.timing(translateY, {
             duration: Math.max((newDuration || 0) - 70, 0),
             toValue: newY,
@@ -361,8 +380,9 @@ const SnapSheet = forwardRef(function SnapSheet({
                     )}
                     <View style={styling.flexer}>
                         <DodgeKeyboard
+                            ref={dodgeRef}
                             offset={keyboardDodgingOffset}
-                            disabled={!sameIndex || disableDodging}
+                            disabled={disableDodging}
                             checkIfElementIsFocused={__checkIfElementIsFocused}
                             onHandleDodging={quicklyDodgeKeyboard}>
                             {ReactHijacker({
