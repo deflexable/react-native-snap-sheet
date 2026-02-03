@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, cloneElement } from "react";
 import { Animated, PanResponder, StyleSheet, useAnimatedValue, View } from "react-native";
-import DodgeKeyboard, { createHijackedElement, ReactHijacker, __HijackNode } from "react-native-dodge-keyboard";
+import { DodgeKeyboard, createHijackedElement, ReactHijacker, __HijackNode } from "react-native-dodge-keyboard";
 import { doRendable, isNumber, isPositiveNumber } from "./utils";
 import { styling } from "./styling";
 
@@ -165,7 +165,7 @@ const SnapSheet = forwardRef(function SnapSheet({
                     stillSnapping.current = false;
                     if (shouldRefreshDodge.current) {
                         isLifting.current = false;
-                        dodgeRef.current.trigger();
+                        if (dodgeRef.current) dodgeRef.current.trigger();
                     }
                 }, { timeout: 700 });
             }
