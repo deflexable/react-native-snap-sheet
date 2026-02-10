@@ -182,6 +182,11 @@ export interface SnapSheetModalProps extends SnapSheetBaseProps {
     renderBackDrop?: React.ReactNode | (() => React.ReactNode);
 
     /**
+     * Optional set color for backdrop
+     */
+    backdropColor?: string | undefined;
+
+    /**
      * Disable backdrop press
      * 
      * @default false

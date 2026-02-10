@@ -20,6 +20,7 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
     centered,
     onStateChanged,
     renderBackDrop,
+    backdropColor,
     disableBackdrop,
     fillScreen = true,
     unMountChildrenWhenClosed = true,
@@ -192,6 +193,11 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
         top: 0
     }) : undefined, [centered, contentHeight, viewWidth]);
 
+    const backdropStyle = useMemo(() => ({
+        ...styling.backdropStyle,
+        ...backdropColor ? { backgroundColor: backdropColor } : undefined
+    }), [backdropColor]);
+
     const inputIdIterator = useRef(0);
 
     const renderChild = () =>
@@ -205,7 +211,7 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
                 doRendable(
                     renderBackDrop,
                     <Pressable
-                        style={styling.backdropStyle}
+                        style={backdropStyle}
                         disabled={!!disableBackdrop}
                         onPress={() => {
                             snapModal.current(0);
