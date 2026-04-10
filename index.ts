@@ -52,6 +52,13 @@ export interface SnapSheetBaseProps {
     renderHandle?: React.ReactNode | (() => React.ReactNode);
 
     /**
+     * Whether to place the sheet handle inside or outside the modal
+     * 
+     * @default false
+     */
+    isHandleOutside?: boolean;
+
+    /**
      * Color of the sheet handle
      */
     handleColor?: string | undefined;

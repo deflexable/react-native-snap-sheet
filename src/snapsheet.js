@@ -19,6 +19,7 @@ const SnapSheet = forwardRef(function SnapSheet({
     inheritScrollVelocityOnCollapse,
     renderHandle,
     handleColor,
+    isHandleOutside,
     keyboardDodgingBehaviour = 'optimum',
     keyboardDodgingOffset,
     children,
@@ -310,6 +311,15 @@ const SnapSheet = forwardRef(function SnapSheet({
         }
     }
 
+    const handleDotConStyle = useMemo(() => ({
+        ...styling.modalHandle,
+        ...isHandleOutside ? {
+            position: 'absolute',
+            width: '100%',
+            top: -(styling.modalHandleItem.height + (styling.modalHandle.paddingVertical * 2))
+        } : {}
+    }), [isHandleOutside]);
+
     const handleDotStyle = useMemo(() => ({
         ...styling.modalHandleItem,
         ...handleColor ? { backgroundColor: handleColor } : {}
@@ -374,7 +384,7 @@ const SnapSheet = forwardRef(function SnapSheet({
                     {...panResponder.panHandlers}>
                     {doRendable?.(
                         renderHandle,
-                        <View style={styling.modalHandle}>
+                        <View style={handleDotConStyle}>
                             <View style={handleDotStyle} />
                         </View>
                     )}

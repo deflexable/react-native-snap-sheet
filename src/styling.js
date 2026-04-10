@@ -6,9 +6,7 @@ export const styling = {
     modalHandle: {
         alignItems: 'center',
         justifyContent: 'center',
-        // backgroundColor: 'red',
-        paddingTop: 7,
-        paddingBottom: 7
+        paddingVertical: 7
     },
 
     modalHandleItem: {
