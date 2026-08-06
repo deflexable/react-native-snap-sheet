@@ -96,9 +96,10 @@ const SnapSheet = forwardRef(function SnapSheet({
     const translateY = useAnimatedValue(snapTranslateValues[initialSnapIndex]);
 
     /**
-     * @type {import("react").RefObject<{[key: string]: { ref: import('react-native').ScrollView, scrollY: 0, location: number[], anchorId: boolean }}>}
+     * @type {import("react").RefObject<{[key: string]: { ref: import('react-native').ScrollView, scrollY: 0, location: number[], anchorId: string }}>}
      */
     const scrollRefObj = useRef({});
+    const restorableScrollY = useRef({});
     const dodgeRef = useRef();
     const lastOffset = useRef(translateY._value);
     const lastSnapIndex = useRef(initialSnapIndex);
@@ -188,14 +189,22 @@ const SnapSheet = forwardRef(function SnapSheet({
     }, [snapPointsKey]);
 
     const panResponder = useMemo(() => {
-
+        // <--- dx negative, dx positive --->
+        /**
+         * ^
+         * |
+         * |
+         * |
+         * dy negative
+         * 
+         */
         return PanResponder.create({
             onMoveShouldSetPanResponderCapture: (_, gesture) => {
                 const { scrollY } = scrollRefObj.current[instantPrefferAnchor.current] || {};
 
                 const isMovingY = (minChange = 3) =>
                     gesture.dy > minChange &&
-                    (gesture.dy / (gesture.dy + gesture.dx)) >= .75;
+                    (Math.abs(gesture.dy) - Math.abs(gesture.dx)) / Math.abs(gesture.dy) >= .75;
 
                 const shouldCapture = !disabled && (
                     !instantScrollEnabled.current ||
@@ -203,7 +212,8 @@ const SnapSheet = forwardRef(function SnapSheet({
                     (instantPrefferAnchor.current === undefined && isMovingY(10))
                 );
                 if (shouldCapture) setScrollEnabled(false);
-                // console.log('onMoveShouldSetPanResponderCapture shouldCapture:', shouldCapture, ' stats:', { gesture, scrollOffset: scrollY, instantScrollEnabled: instantScrollEnabled.current }, ' gesture.dy > 0:', gesture.dy > 1);
+
+                // console.log('shouldCaptureX:', shouldCapture, ' anchor:', instantPrefferAnchor.current, ' scrollEnable:', instantScrollEnabled.current, ' dy:', gesture.dy, ' scrollY:', scrollY);
                 return shouldCapture;
             },
             onPanResponderMove: (_, gesture) => {
@@ -279,10 +289,11 @@ const SnapSheet = forwardRef(function SnapSheet({
 
     const onAnchorScroll = (e, instanceId) => {
         const scrollY = e.nativeEvent.contentOffset.y;
-        if (scrollRefObj.current[instanceId])
+        if (scrollRefObj.current[instanceId]) {
             scrollRefObj.current[instanceId].scrollY = scrollY;
+        } else recordInstanceScrollY(instanceId, scrollY);
 
-        // console.log('onAnchorScroll scrollOffset:', scrollY);
+        // console.log('onAnchorScroll scrollOffset:', scrollY, ' instanceId:', instanceId, ' hasObj:', !!scrollRefObj.current[instanceId]);
         if (!inheritScrollVelocityOnCollapse) {
             prevScrollY.current = 0;
             prevTime.current = 0;
@@ -376,6 +387,25 @@ const SnapSheet = forwardRef(function SnapSheet({
         });
     }
 
+    const recordInstanceScrollY = (instanceId, scrollY) => {
+        deleteInstanceScrollY(instanceId);
+
+        restorableScrollY.current[instanceId] = {
+            scrollY,
+            timer:
+                setTimeout(() => {
+                    deleteInstanceScrollY(instanceId);
+                }, 1000)
+        };
+    }
+
+    const deleteInstanceScrollY = (instanceId) => {
+        const v = restorableScrollY.current[instanceId];
+        if (v) clearTimeout(v.timer);
+
+        delete restorableScrollY.current[instanceId];
+    }
+
     return (
         <View style={styling.absoluteFill}>
             <View style={{ position: 'absolute', bottom: 0, width: '100%' }}>
@@ -409,7 +439,11 @@ const SnapSheet = forwardRef(function SnapSheet({
 
                                         const initNode = () => {
                                             if (!scrollRefObj.current[instanceId])
-                                                scrollRefObj.current[instanceId] = { scrollY: 0, location: path };
+                                                scrollRefObj.current[instanceId] = {
+                                                    scrollY: restorableScrollY.current[instanceId]?.scrollY || 0,
+                                                    location: path
+                                                };
+
                                             const thisAnchorId = node.props?.snap_sheet_scroll_anchor;
 
                                             if (scrollRefObj.current[instanceId].anchorId !== thisAnchorId) {
@@ -428,7 +462,10 @@ const SnapSheet = forwardRef(function SnapSheet({
                                                     initNode();
                                                     // if (scrollRefObj.current[instanceId].ref !== r) scheduleAnchorUpdate();
                                                     scrollRefObj.current[instanceId].ref = r;
+                                                    deleteInstanceScrollY(instanceId);
                                                 } else if (scrollRefObj.current[instanceId]) {
+                                                    recordInstanceScrollY(instanceId, scrollRefObj.current[instanceId].scrollY);
+
                                                     delete scrollRefObj.current[instanceId];
                                                     scheduleAnchorUpdate();
                                                 }

@@ -20,10 +20,12 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
     centered,
     onStateChanged,
     renderBackDrop,
+    onBackdropPressed,
     backdropColor,
     disableBackdrop,
     fillScreen = true,
     unMountChildrenWhenClosed = true,
+    _disableAdaptiveBehaviour, // TODO:
     disableBackHandler,
     containerStyle,
     disabled,
@@ -214,6 +216,15 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
                         style={backdropStyle}
                         disabled={!!disableBackdrop}
                         onPress={() => {
+                            let prevent;
+
+                            onBackdropPressed?.({
+                                preventDefault: () => {
+                                    prevent = true
+                                }
+                            });
+
+                            if (prevent) return;
                             snapModal.current(0);
                         }} />
                 )}
@@ -321,12 +332,12 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
             zIndex: hasClosed ? -99 : 9999,
             elevation: hasClosed ? 0 : 9999,
             ...hasClosed ? { opacity: 0 } : {},
-            ...flatStyle,
             position: 'absolute',
             width: '100%',
             height: '100%',
             top: 0,
-            left: 0
+            left: 0,
+            ...flatStyle
         };
     }, [containerStyle, hasClosed]);
 
