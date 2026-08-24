@@ -99,7 +99,10 @@ const SnapSheet = forwardRef(function SnapSheet({
      * @type {import("react").RefObject<{[key: string]: { ref: import('react-native').ScrollView, scrollY: 0, location: number[], anchorId: string }}>}
      */
     const scrollRefObj = useRef({});
-    const restorableScrollY = useRef({});
+    /**
+     * @type {import("react").RefObject<{[key: string]: { px: number, py: number, w: number, h: number }}>}
+     */
+    const avoidableSurfaces = useRef({});
     const dodgeRef = useRef();
     const lastOffset = useRef(translateY._value);
     const lastSnapIndex = useRef(initialSnapIndex);
@@ -199,8 +202,24 @@ const SnapSheet = forwardRef(function SnapSheet({
          * 
          */
         return PanResponder.create({
-            onMoveShouldSetPanResponderCapture: (_, gesture) => {
+            onMoveShouldSetPanResponderCapture: (event, gesture) => {
+                if (gesture.numberActiveTouches > 1) return false;
+
                 const { scrollY } = scrollRefObj.current[instantPrefferAnchor.current] || {};
+                const { pageX, pageY } = event?.nativeEvent || {};
+
+                const boundries =
+                    Object.entries(avoidableSurfaces.current)
+                        .filter(([_, v]) =>
+                            pageY >= v.py &&
+                            pageX >= v.px &&
+                            pageY <= (v.py + v.h) &&
+                            pageX <= (v.px + v.w)
+                        );
+
+                if (boundries.length && !boundries.some(v => v[0] === instantPrefferAnchor.current)) {
+                    return false;
+                }
 
                 const isMovingY = (minChange = 3) =>
                     gesture.dy > minChange &&
@@ -208,7 +227,7 @@ const SnapSheet = forwardRef(function SnapSheet({
 
                 const shouldCapture = !disabled && (
                     !instantScrollEnabled.current ||
-                    (scrollY <= 0 && isMovingY(5)) ||
+                    (scrollY <= 0 && isMovingY(7)) ||
                     (instantPrefferAnchor.current === undefined && isMovingY(10))
                 );
                 if (shouldCapture) setScrollEnabled(false);
@@ -281,17 +300,21 @@ const SnapSheet = forwardRef(function SnapSheet({
     }
 
     const updatePrefferAnchor = () => {
-        const rankedAnchors = Object.entries(scrollRefObj.current).sort((a, b) => compareReactPaths(a[1].location, b[1].location));
+        const rankedAnchors =
+            Object.entries(scrollRefObj.current)
+                .sort((a, b) =>
+                    compareReactPaths(a[1].location, b[1].location)
+                );
+
         const directAnchor = rankedAnchors.find(v => v[1].anchorId === currentAnchorId);
         setPrefferedAnchor(directAnchor?.[0]);
     }
+
     useEffect(updatePrefferAnchor, [currentAnchorId]);
 
     const onAnchorScroll = (e, instanceId) => {
         const scrollY = e.nativeEvent.contentOffset.y;
-        if (scrollRefObj.current[instanceId]) {
-            scrollRefObj.current[instanceId].scrollY = scrollY;
-        } else recordInstanceScrollY(instanceId, scrollY);
+        scrollRefObj.current[instanceId].scrollY = scrollY;
 
         // console.log('onAnchorScroll scrollOffset:', scrollY, ' instanceId:', instanceId, ' hasObj:', !!scrollRefObj.current[instanceId]);
         if (!inheritScrollVelocityOnCollapse) {
@@ -387,25 +410,6 @@ const SnapSheet = forwardRef(function SnapSheet({
         });
     }
 
-    const recordInstanceScrollY = (instanceId, scrollY) => {
-        deleteInstanceScrollY(instanceId);
-
-        restorableScrollY.current[instanceId] = {
-            scrollY,
-            timer:
-                setTimeout(() => {
-                    deleteInstanceScrollY(instanceId);
-                }, 1000)
-        };
-    }
-
-    const deleteInstanceScrollY = (instanceId) => {
-        const v = restorableScrollY.current[instanceId];
-        if (v) clearTimeout(v.timer);
-
-        delete restorableScrollY.current[instanceId];
-    }
-
     return (
         <View style={styling.absoluteFill}>
             <View style={{ position: 'absolute', bottom: 0, width: '100%' }}>
@@ -425,22 +429,33 @@ const SnapSheet = forwardRef(function SnapSheet({
                             disabled={disableDodging}
                             checkIfElementIsFocused={__checkIfElementIsFocused}
                             onHandleDodging={quicklyDodgeKeyboard}>
-                            {ReactHijacker({
-                                children,
-                                enableLocator: true,
-                                doHijack: (node, path) => {
+                            <ReactHijacker
+                                enableLocator
+                                doHijack={(node, path) => {
                                     if (node?.props?.snap_sheet_scan_off || node?.props?.__checking_snap_scrollable)
                                         return createHijackedElement(node);
 
-                                    if (!isScrollable(node)) return;
+                                    const thisScrollable = isScrollable(node);
+
+                                    if (!node?.props?.scroll_anchor_snap_avoid && !thisScrollable) return;
 
                                     const renderer = () => {
                                         const instanceId = useMemo(() => `${++instanceIdIterator.current}`, []);
 
+                                        useEffect(() => {
+                                            return () => {
+                                                if (scrollRefObj.current.hasOwnProperty(instanceId))
+                                                    delete scrollRefObj.current[instanceId];
+
+                                                if (avoidableSurfaces.current.hasOwnProperty(instanceId))
+                                                    delete avoidableSurfaces.current[instanceId];
+                                            }
+                                        }, []);
+
                                         const initNode = () => {
                                             if (!scrollRefObj.current[instanceId])
                                                 scrollRefObj.current[instanceId] = {
-                                                    scrollY: restorableScrollY.current[instanceId]?.scrollY || 0,
+                                                    scrollY: 0,
                                                     location: path
                                                 };
 
@@ -451,23 +466,22 @@ const SnapSheet = forwardRef(function SnapSheet({
                                             }
                                             scrollRefObj.current[instanceId].anchorId = thisAnchorId;
                                         }
-                                        initNode();
+
+                                        if (thisScrollable) initNode();
 
                                         const newProps = {
                                             ...node?.props,
                                             __checking_snap_scrollable: true,
-                                            ...disableDodging ? {} : { ['dodge_keyboard_scrollable']: true },
                                             ref: r => {
                                                 if (r) {
-                                                    initNode();
-                                                    // if (scrollRefObj.current[instanceId].ref !== r) scheduleAnchorUpdate();
-                                                    scrollRefObj.current[instanceId].ref = r;
-                                                    deleteInstanceScrollY(instanceId);
-                                                } else if (scrollRefObj.current[instanceId]) {
-                                                    recordInstanceScrollY(instanceId, scrollRefObj.current[instanceId].scrollY);
+                                                    if (thisScrollable) {
+                                                        initNode();
+                                                        scrollRefObj.current[instanceId].ref = r;
+                                                    }
 
-                                                    delete scrollRefObj.current[instanceId];
-                                                    scheduleAnchorUpdate();
+                                                    r.measure((x, y, w, h, px, py) => {
+                                                        avoidableSurfaces.current[instanceId] = { w, h, px, py };
+                                                    });
                                                 }
 
                                                 const thatRef = node.props?.ref;
@@ -475,11 +489,14 @@ const SnapSheet = forwardRef(function SnapSheet({
                                                     thatRef(r);
                                                 } else if (thatRef) thatRef.current = r;
                                             },
-                                            ...prefferedAnchor === instanceId ? { scrollEnabled } : {},
-                                            onScroll: (e) => {
-                                                onAnchorScroll(e, instanceId);
-                                                return node.props?.onScroll?.(e);
-                                            }
+                                            ...thisScrollable ? {
+                                                ...disableDodging ? {} : { ['dodge_keyboard_scrollable']: true },
+                                                onScroll: e => {
+                                                    onAnchorScroll(e, instanceId);
+                                                    return node.props?.onScroll?.(e);
+                                                },
+                                                ...prefferedAnchor === instanceId ? { scrollEnabled } : {}
+                                            } : {}
                                         };
 
                                         return cloneElement(node, newProps);
@@ -490,8 +507,9 @@ const SnapSheet = forwardRef(function SnapSheet({
                                             {renderer}
                                         </__HijackNode>
                                     );
-                                }
-                            })}
+                                }}>
+                                {children}
+                            </ReactHijacker>
                             {isLift ?
                                 <View
                                     ref={r => {

@@ -228,101 +228,101 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
                             snapModal.current(0);
                         }} />
                 )}
-            <ReactHijacker
-                doHijack={node => {
-                    // if (node?.props?.dodge_keyboard_scan_off)
-                    //     return createHijackedElement(node);
-                    if (!isDodgeInput(node)) return;
-
-                    const renderer = () => {
-                        const inputId = useMemo(() => `${++inputIdIterator.current}`, []);
-
-                        const newProps = {
-                            ...node.props,
-                            ref: r => {
-                                if (r) {
-                                    inputRefs.current[inputId] = r;
-                                } else if (inputRefs.current[inputId]) {
-                                    delete inputRefs.current[inputId];
-                                }
-
-                                const thatRef = node.props?.ref;
-                                if (typeof thatRef === 'function') {
-                                    thatRef(r);
-                                } else if (thatRef) thatRef.current = r;
-                            }
-                        };
-
-                        return cloneElement(node, newProps);
-                    }
-
-                    return createHijackedElement(
-                        <__HijackNode>
-                            {renderer}
-                        </__HijackNode>
-                    );
+            <SnapSheet
+                {...restProps}
+                minSnapIndex={0}
+                ref={sheetRef}
+                snapPoints={snapPoints}
+                {...centered ? {
+                    style: CenteredSheetStyle,
+                    renderHandle: null,
+                    ...isLift ? {
+                        __checkIfElementIsFocused: (r, refs) => {
+                            const realChecker = restProps?.__checkIfElementIsFocused;
+                            return !!r?.[CheckFocusedNode] &&
+                                !willClose &&
+                                refs.some(v => realChecker ? realChecker?.(v, refs) : v?.isFocused?.());
+                        },
+                        keyboardDodgingBehaviour: 'optimum'
+                    } : {}
+                } : {}}
+                {...hasClosed ? { keyboardDodgingBehaviour: 'off' } : {}}
+                initialSnapIndex={Math.min(ModalState.indexOf(currentState), centered ? 1 : 2)}
+                disabled={centered || disabled || disablePanGesture}
+                onSnapFinish={i => {
+                    setCurrentState(ModalState[i]);
+                }}
+                onSnapIndex={i => {
+                    setFutureState(ModalState[i]);
                 }}>
-                <SnapSheet
-                    {...restProps}
-                    minSnapIndex={0}
-                    ref={sheetRef}
-                    snapPoints={snapPoints}
-                    {...centered ? {
-                        style: CenteredSheetStyle,
-                        renderHandle: null,
-                        ...isLift ? {
-                            __checkIfElementIsFocused: (r, refs) => {
-                                const realChecker = restProps?.__checkIfElementIsFocused;
-                                return !!r?.[CheckFocusedNode] &&
-                                    !willClose &&
-                                    refs.some(v => realChecker ? realChecker?.(v, refs) : v?.isFocused?.());
-                            },
-                            keyboardDodgingBehaviour: 'optimum'
-                        } : {}
-                    } : {}}
-                    {...hasClosed ? { keyboardDodgingBehaviour: 'off' } : {}}
-                    initialSnapIndex={Math.min(ModalState.indexOf(currentState), centered ? 1 : 2)}
-                    disabled={centered || disabled || disablePanGesture}
-                    onSnapFinish={i => {
-                        setCurrentState(ModalState[i]);
-                    }}
-                    onSnapIndex={i => {
-                        setFutureState(ModalState[i]);
-                    }}>
-                    {(hasClosed && (!releaseUnmount && unMountChildrenWhenClosed))
-                        ? null :
-                        <View
-                            style={centered ? centeredStyle : styling.flexer}
-                            onLayout={e => {
-                                if (centered) {
-                                    const h = e.nativeEvent.layout.height;
+                {(hasClosed && (!releaseUnmount && unMountChildrenWhenClosed))
+                    ? null :
+                    <View
+                        style={centered ? centeredStyle : styling.flexer}
+                        onLayout={e => {
+                            if (centered) {
+                                const h = e.nativeEvent.layout.height;
 
-                                    if (contentHeight === undefined)
-                                        return setContentHeight(PixelRatio.roundToNearestPixel(h));
+                                if (contentHeight === undefined)
+                                    return setContentHeight(PixelRatio.roundToNearestPixel(h));
 
-                                    const pixel = PixelRatio.roundToNearestPixel(h);
+                                const pixel = PixelRatio.roundToNearestPixel(h);
 
-                                    if (Math.abs(contentHeight - pixel) >= 1)
-                                        setContentHeight(pixel);
-                                }
-                            }}>
-                            <View style={centered ? restProps.style : styling.flexer}>
+                                if (Math.abs(contentHeight - pixel) >= 1)
+                                    setContentHeight(pixel);
+                            }
+                        }}>
+                        <View style={centered ? restProps.style : styling.flexer}>
+                            <ReactHijacker
+                                doHijack={node => {
+                                    // if (node?.props?.dodge_keyboard_scan_off)
+                                    //     return createHijackedElement(node);
+                                    if (!isDodgeInput(node)) return;
+
+                                    const renderer = () => {
+                                        const inputId = useMemo(() => `${++inputIdIterator.current}`, []);
+
+                                        const newProps = {
+                                            ...node.props,
+                                            ref: r => {
+                                                if (r) {
+                                                    inputRefs.current[inputId] = r;
+                                                } else if (inputRefs.current[inputId]) {
+                                                    delete inputRefs.current[inputId];
+                                                }
+
+                                                const thatRef = node.props?.ref;
+                                                if (typeof thatRef === 'function') {
+                                                    thatRef(r);
+                                                } else if (thatRef) thatRef.current = r;
+                                            }
+                                        };
+
+                                        return cloneElement(node, newProps);
+                                    }
+
+                                    return createHijackedElement(
+                                        <__HijackNode>
+                                            {renderer}
+                                        </__HijackNode>
+                                    );
+                                }}>
                                 {children}
-                            </View>
-                            {isLift ?
-                                <View
-                                    ref={r => {
-                                        if (r) {
-                                            r[CheckFocusedNode] = true;
-                                        }
-                                    }}
-                                    dodge_keyboard_input
-                                    dodge_keyboard_clipping
-                                    style={styling.fakePlaceholder}
-                                /> : null}
-                        </View>}
-                </SnapSheet>
-            </ReactHijacker>
+                            </ReactHijacker>
+                        </View>
+                        {isLift ?
+                            <View
+                                ref={r => {
+                                    if (r) {
+                                        r[CheckFocusedNode] = true;
+                                    }
+                                }}
+                                dodge_keyboard_input
+                                dodge_keyboard_clipping
+                                style={styling.fakePlaceholder}
+                            /> : null}
+                    </View>}
+            </SnapSheet>
         </View>
 
     const conStyle = useMemo(() => {
