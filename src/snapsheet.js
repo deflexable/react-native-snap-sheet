@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, cloneElement } from "react";
-import { Animated, PanResponder, StyleSheet, useAnimatedValue, View } from "react-native";
+import { Animated, findNodeHandle, PanResponder, StyleSheet, UIManager, useAnimatedValue, View } from "react-native";
 import { DodgeKeyboard, createHijackedElement, ReactHijacker, __HijackNode } from "react-native-dodge-keyboard";
 import { doRendable, isNumber, isPositiveNumber } from "./utils";
 import { styling } from "./styling";
@@ -93,7 +93,7 @@ const SnapSheet = forwardRef(function SnapSheet({
 
     const snapTranslateValues = useMemo(() => snapPoints.map(h => MODAL_HEIGHT - h), [snapPointsKey]);
 
-    const translateY = useAnimatedValue(snapTranslateValues[initialSnapIndex]);
+    const translateY = useAnimatedValue(snapTranslateValues[initialSnapIndex], { useNativeDriver: true });
 
     /**
      * @type {import("react").RefObject<{[key: string]: { ref: import('react-native').ScrollView, scrollY: 0, location: number[], anchorId: string }}>}
@@ -223,12 +223,12 @@ const SnapSheet = forwardRef(function SnapSheet({
 
                 const isMovingY = (minChange = 3) =>
                     gesture.dy > minChange &&
-                    (Math.abs(gesture.dy) - Math.abs(gesture.dx)) / Math.abs(gesture.dy) >= .75;
+                    (Math.abs(gesture.dy) - Math.abs(gesture.dx)) / Math.abs(gesture.dy) >= .7;
 
                 const shouldCapture = !disabled && (
                     !instantScrollEnabled.current ||
-                    (scrollY <= 0 && isMovingY(7)) ||
-                    (instantPrefferAnchor.current === undefined && isMovingY(10))
+                    (scrollY <= 0 && isMovingY(5)) ||
+                    (instantPrefferAnchor.current === undefined && isMovingY(7))
                 );
                 if (shouldCapture) setScrollEnabled(false);
 
@@ -444,8 +444,10 @@ const SnapSheet = forwardRef(function SnapSheet({
 
                                         useEffect(() => {
                                             return () => {
-                                                if (scrollRefObj.current.hasOwnProperty(instanceId))
+                                                if (scrollRefObj.current.hasOwnProperty(instanceId)) {
                                                     delete scrollRefObj.current[instanceId];
+                                                    scheduleAnchorUpdate();
+                                                }
 
                                                 if (avoidableSurfaces.current.hasOwnProperty(instanceId))
                                                     delete avoidableSurfaces.current[instanceId];
@@ -453,6 +455,8 @@ const SnapSheet = forwardRef(function SnapSheet({
                                         }, []);
 
                                         const initNode = () => {
+                                            const wasAssigned = scrollRefObj.current.hasOwnProperty(instanceId);
+
                                             if (!scrollRefObj.current[instanceId])
                                                 scrollRefObj.current[instanceId] = {
                                                     scrollY: 0,
@@ -461,7 +465,7 @@ const SnapSheet = forwardRef(function SnapSheet({
 
                                             const thisAnchorId = node.props?.snap_sheet_scroll_anchor;
 
-                                            if (scrollRefObj.current[instanceId].anchorId !== thisAnchorId) {
+                                            if (scrollRefObj.current[instanceId].anchorId !== thisAnchorId || !wasAssigned) {
                                                 scheduleAnchorUpdate(300);
                                             }
                                             scrollRefObj.current[instanceId].anchorId = thisAnchorId;
@@ -479,7 +483,7 @@ const SnapSheet = forwardRef(function SnapSheet({
                                                         scrollRefObj.current[instanceId].ref = r;
                                                     }
 
-                                                    r.measure((x, y, w, h, px, py) => {
+                                                    UIManager.measure(findNodeHandle(r), (x, y, w, h, px, py) => {
                                                         avoidableSurfaces.current[instanceId] = { w, h, px, py };
                                                     });
                                                 }
