@@ -100,7 +100,7 @@ const SnapSheet = forwardRef(function SnapSheet({
      */
     const scrollRefObj = useRef({});
     /**
-     * @type {import("react").RefObject<{[key: string]: { px: number, py: number, w: number, h: number }}>}
+     * @type {import("react").RefObject<{[key: string]: { l: number, t: number, w: number, h: number }}>}
      */
     const avoidableSurfaces = useRef({});
     const dodgeRef = useRef();
@@ -208,14 +208,25 @@ const SnapSheet = forwardRef(function SnapSheet({
                 const { scrollY } = scrollRefObj.current[instantPrefferAnchor.current] || {};
                 const { pageX, pageY } = event?.nativeEvent || {};
 
+                const sheetX = sheetPlacement.current?.px;
+                const sheetY =
+                    sheetPlacement.current?.py +
+                    sheetPlacement.current?.h +
+                    (translateY._value - MODAL_HEIGHT);
+
                 const boundries =
                     Object.entries(avoidableSurfaces.current)
-                        .filter(([_, v]) =>
-                            pageY >= v.py &&
-                            pageX >= v.px &&
-                            pageY <= (v.py + v.h) &&
-                            pageX <= (v.px + v.w)
-                        );
+                        .filter(([_, v]) => {
+                            const y = v.t + sheetY;
+                            const x = v.l + sheetX;
+
+                            if (isNaN(y) || isNaN(x)) return false;
+
+                            return pageY >= y &&
+                                pageX >= x &&
+                                pageY <= (y + v.h) &&
+                                pageX <= (x + v.w);
+                        });
 
                 if (boundries.length && !boundries.some(v => v[0] === instantPrefferAnchor.current)) {
                     return false;
@@ -276,7 +287,7 @@ const SnapSheet = forwardRef(function SnapSheet({
                 }
             }
         });
-    }, [!disabled, snapPointsKey, minSnapIndex]);
+    }, [!disabled, snapPointsKey, minSnapIndex, MODAL_HEIGHT]);
 
     const conStyle = useMemo(() => {
         const { height, minHeight, maxHeight, ...rest } = flattenStyle;
@@ -410,10 +421,30 @@ const SnapSheet = forwardRef(function SnapSheet({
         });
     }
 
+    const sheetNodeId = useRef();
+    /**
+     * @type {import("react").RefObject<{ px: number, py: number, w: number, h: number }>}
+     */
+    const sheetPlacement = useRef();
+
     return (
         <View style={styling.absoluteFill}>
-            <View style={{ position: 'absolute', bottom: 0, width: '100%' }}>
+            <View style={{ position: 'absolute', bottom: 0, width: '100%' }}
+                ref={r => {
+                    if (r)
+                        r.measure((x, y, w, h, px, py) => {
+                            sheetPlacement.current = { w, h, px, py };
+                        });
+                }}
+                onLayout={e => {
+                    e.currentTarget.measure((x, y, w, h, px, py) => {
+                        sheetPlacement.current = { w, h, px, py };
+                    });
+                }}>
                 <Animated.View
+                    ref={r => {
+                        if (r) sheetNodeId.current = findNodeHandle(r);
+                    }}
                     style={conStyle}
                     {...panResponder.panHandlers}>
                     {doRendable?.(
@@ -473,6 +504,18 @@ const SnapSheet = forwardRef(function SnapSheet({
 
                                         if (thisScrollable) initNode();
 
+                                        const updatePlacement = (ref) => {
+                                            if (ref && sheetNodeId.current !== undefined)
+                                                UIManager.measureLayout(
+                                                    findNodeHandle(ref),
+                                                    findNodeHandle(sheetNodeId.current),
+                                                    () => { },
+                                                    (l, t, w, h) => {
+                                                        avoidableSurfaces.current[instanceId] = { l, t, w, h };
+                                                    }
+                                                );
+                                        }
+
                                         const newProps = {
                                             ...node?.props,
                                             __checking_snap_scrollable: true,
@@ -482,16 +525,17 @@ const SnapSheet = forwardRef(function SnapSheet({
                                                         initNode();
                                                         scrollRefObj.current[instanceId].ref = r;
                                                     }
-
-                                                    UIManager.measure(findNodeHandle(r), (x, y, w, h, px, py) => {
-                                                        avoidableSurfaces.current[instanceId] = { w, h, px, py };
-                                                    });
+                                                    updatePlacement(r);
                                                 }
 
                                                 const thatRef = node.props?.ref;
                                                 if (typeof thatRef === 'function') {
                                                     thatRef(r);
                                                 } else if (thatRef) thatRef.current = r;
+                                            },
+                                            onLayout: e => {
+                                                updatePlacement(e.currentTarget);
+                                                node.props?.onLayout?.(e);
                                             },
                                             ...thisScrollable ? {
                                                 ...disableDodging ? {} : { ['dodge_keyboard_scrollable']: true },
