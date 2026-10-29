@@ -1,6 +1,5 @@
-import { forwardRef, useContext, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState, cloneElement } from "react";
-import { Pressable, StyleSheet, View, PixelRatio } from "react-native";
-import { createHijackedElement, isDodgeInput, ReactHijacker, __HijackNode } from "react-native-dodge-keyboard";
+import { forwardRef, useContext, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState } from "react";
+import { Pressable, StyleSheet, View, PixelRatio, TextInput } from "react-native";
 import { useBackButton } from "react-native-push-back";
 import { doRendable, isNumber } from "./utils";
 import { PortalContext } from "./provider";
@@ -109,7 +108,6 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
     const isOpened = futureState !== 'closed';
 
     const sheetRef = useRef();
-    const inputRefs = useRef({});
     const snapModal = useRef();
     const lastIndexIntent = useRef({});
 
@@ -155,9 +153,7 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
     useEffect(() => {
         if (willClose)
             try {
-                Object.values(inputRefs.current).forEach(e => {
-                    if (e?.isFocused?.()) e?.blur?.();
-                });
+                TextInput.State.currentlyFocusedInput()?.blur?.();
             } catch (error) {
                 console.error('snapSheet remove auto-blur err', error);
             }
@@ -273,42 +269,7 @@ export const SnapSheetModalBase = forwardRef(function SnapSheetModalBase({
                             }
                         }}>
                         <View style={centered ? restProps.style : styling.flexer}>
-                            <ReactHijacker
-                                doHijack={node => {
-                                    // if (node?.props?.dodge_keyboard_scan_off)
-                                    //     return createHijackedElement(node);
-                                    if (!isDodgeInput(node)) return;
-
-                                    const renderer = () => {
-                                        const inputId = useMemo(() => `${++inputIdIterator.current}`, []);
-
-                                        const newProps = {
-                                            ...node.props,
-                                            ref: r => {
-                                                if (r) {
-                                                    inputRefs.current[inputId] = r;
-                                                } else if (inputRefs.current[inputId]) {
-                                                    delete inputRefs.current[inputId];
-                                                }
-
-                                                const thatRef = node.props?.ref;
-                                                if (typeof thatRef === 'function') {
-                                                    thatRef(r);
-                                                } else if (thatRef) thatRef.current = r;
-                                            }
-                                        };
-
-                                        return cloneElement(node, newProps);
-                                    }
-
-                                    return createHijackedElement(
-                                        <__HijackNode>
-                                            {renderer}
-                                        </__HijackNode>
-                                    );
-                                }}>
-                                {children}
-                            </ReactHijacker>
+                            {children}
                         </View>
                         {isLift ?
                             <View

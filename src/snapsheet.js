@@ -1,8 +1,9 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, cloneElement } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, cloneElement, Fragment } from "react";
 import { Animated, findNodeHandle, PanResponder, StyleSheet, UIManager, useAnimatedValue, View } from "react-native";
-import { DodgeKeyboard, createHijackedElement, ReactHijacker, __HijackNode } from "react-native-dodge-keyboard";
+import { DodgeKeyboard } from "react-native-dodge-keyboard";
 import { doRendable, isNumber, isPositiveNumber } from "./utils";
 import { styling } from "./styling";
+import MutateReact, { createMutantElement } from "mutate-react";
 
 const PixelRate = 70 / 100; // 70ms to 100 pixels
 const CheckFocusedNode = '__fakeSnapSheetFocused';
@@ -25,6 +26,8 @@ const SnapSheet = forwardRef(function SnapSheet({
     children,
     disabled,
     currentAnchorId,
+    __forceDisableDodging,
+    _perceivedDodgeInputSize,
     __checkIfElementIsFocused,
     __loosenMinSnap
 }, ref) {
@@ -32,6 +35,9 @@ const SnapSheet = forwardRef(function SnapSheet({
 
     if (!['optimum', 'whole', 'off'].includes(keyboardDodgingBehaviour))
         throw `keyboardDodgingBehaviour must be any of ${['optimum', 'whole', 'off']} but got ${keyboardDodgingBehaviour}`;
+
+    if (__forceDisableDodging && keyboardDodgingBehaviour !== 'off')
+        throw `__forceDisableDodging requires setting keyboardDodgingBehaviour to 'off'`;
 
     if (snapPoints.length < 2) throw new Error('snapPoints must have at least two items');
     snapPoints.forEach((v, i, a) => {
@@ -71,6 +77,7 @@ const SnapSheet = forwardRef(function SnapSheet({
     const [scrollEnabled, setScrollEnabled] = useState(false);
     const [dodgeOffset, setDodgeOffset] = useState(0);
     const [prefferedAnchor, setPrefferedAnchor] = useState();
+    const [parentHeight, setParentHeight] = useState();
 
     snapPoints = snapPoints.map(v => v + dodgeOffset);
     const snapPointsKey = `${snapPoints}`;
@@ -96,7 +103,7 @@ const SnapSheet = forwardRef(function SnapSheet({
     const translateY = useAnimatedValue(snapTranslateValues[initialSnapIndex], { useNativeDriver: true });
 
     /**
-     * @type {import("react").RefObject<{[key: string]: { ref: import('react-native').ScrollView, scrollY: 0, location: number[], anchorId: string }}>}
+     * @type {import("react").RefObject<{[key: string]: { ref: import('react-native').ScrollView, scrollY: 0, anchorId: string }}>}
      */
     const scrollRefObj = useRef({});
     /**
@@ -191,6 +198,19 @@ const SnapSheet = forwardRef(function SnapSheet({
         if (!isLifting.current) snapToIndex.current(Math.min(lastSnapIndex.current, snapPoints.length - 1), true);
     }, [snapPointsKey]);
 
+    _perceivedDodgeInputSize =
+        useMemo(() => {
+            if (keyboardDodgingBehaviour !== 'optimum' || __checkIfElementIsFocused) return;
+            if (_perceivedDodgeInputSize !== undefined)
+                return _perceivedDodgeInputSize;
+
+            if (parentHeight === undefined) {
+                return MODAL_HEIGHT * .35;
+            }
+
+            return Math.max(0, Math.min(MODAL_HEIGHT * .35, (parentHeight - MODAL_HEIGHT) * .8));
+        }, [_perceivedDodgeInputSize, parentHeight, MODAL_HEIGHT, keyboardDodgingBehaviour, !__checkIfElementIsFocused]);
+
     const panResponder = useMemo(() => {
         // <--- dx negative, dx positive --->
         /**
@@ -217,8 +237,10 @@ const SnapSheet = forwardRef(function SnapSheet({
                 const boundries =
                     Object.entries(avoidableSurfaces.current)
                         .filter(([_, v]) => {
+                            if (v?.t === undefined || v?.px === undefined) return false;
+
                             const y = v.t + sheetY;
-                            const x = v.l + sheetX;
+                            const x = v.px + sheetX;
 
                             if (isNaN(y) || isNaN(x)) return false;
 
@@ -305,20 +327,50 @@ const SnapSheet = forwardRef(function SnapSheet({
 
     const updateAnchorReducer = useRef();
 
-    const scheduleAnchorUpdate = (timeout = 100) => {
+    const scheduleAnchorUpdate = (timeout = 30) => {
         clearTimeout(updateAnchorReducer.current);
         updateAnchorReducer.current = setTimeout(updatePrefferAnchor, timeout);
     }
 
     const updatePrefferAnchor = () => {
-        const rankedAnchors =
-            Object.entries(scrollRefObj.current)
-                .sort((a, b) =>
-                    compareReactPaths(a[1].location, b[1].location)
-                );
+        const anchorList =
+            Object.entries(avoidableSurfaces.current)
+                .map(([k, v], index) => {
+                    if (v?.t === undefined || v?.px === undefined) return false;
 
-        const directAnchor = rankedAnchors.find(v => v[1].anchorId === currentAnchorId);
-        setPrefferedAnchor(directAnchor?.[0]);
+                    const o = scrollRefObj.current[k];
+                    if (!o) return;
+
+                    return {
+                        index,
+                        instanceId: k,
+                        anchorId: o.anchorId,
+                        width: v.w,
+                        height: v.h,
+                        y: v.t,
+                        x: v.px
+                    };
+                }).filter(v => v);
+
+        const directAnchor =
+            currentAnchorId !== undefined &&
+            anchorList.find(v => v.anchorId === currentAnchorId);
+
+        if (directAnchor) {
+            setPrefferedAnchor(directAnchor.instanceId);
+            return;
+        }
+
+        if (!sheetSizing.current) return;
+
+        const bestIndex =
+            getIndexOfMostVisibleArea(
+                sheetSizing.current.w,
+                sheetSizing.current.h,
+                anchorList
+            );
+
+        setPrefferedAnchor(bestIndex === -1 ? undefined : anchorList[bestIndex]?.instanceId);
     }
 
     useEffect(updatePrefferAnchor, [currentAnchorId]);
@@ -356,19 +408,21 @@ const SnapSheet = forwardRef(function SnapSheet({
         }
     }
 
-    const handleDotConStyle = useMemo(() => ({
-        ...styling.modalHandle,
-        ...isHandleOutside ? {
-            position: 'absolute',
-            width: '100%',
-            top: -(styling.modalHandleItem.height + (styling.modalHandle.paddingVertical * 2))
-        } : {}
-    }), [isHandleOutside]);
+    const handleDotConStyle =
+        useMemo(() => ({
+            ...styling.modalHandle,
+            ...isHandleOutside ? {
+                position: 'absolute',
+                width: '100%',
+                top: -(styling.modalHandleItem.height + (styling.modalHandle.paddingVertical * 2))
+            } : {}
+        }), [isHandleOutside]);
 
-    const handleDotStyle = useMemo(() => ({
-        ...styling.modalHandleItem,
-        ...handleColor ? { backgroundColor: handleColor } : {}
-    }), [handleColor]);
+    const handleDotStyle =
+        useMemo(() => ({
+            ...styling.modalHandleItem,
+            ...handleColor ? { backgroundColor: handleColor } : {}
+        }), [handleColor]);
 
     const disableDodging = keyboardDodgingBehaviour === 'off';
 
@@ -426,9 +480,15 @@ const SnapSheet = forwardRef(function SnapSheet({
      * @type {import("react").RefObject<{ px: number, py: number, w: number, h: number }>}
      */
     const sheetPlacement = useRef();
+    const sheetSizing = useRef();
+
+    const DodgeKeyboardComponent = __forceDisableDodging ? Fragment : DodgeKeyboard;
 
     return (
-        <View style={styling.absoluteFill}>
+        <View style={styling.absoluteFill}
+            onLayout={e => {
+                setParentHeight(e.nativeEvent.layout.height);
+            }}>
             <View style={{ position: 'absolute', bottom: 0, width: '100%' }}
                 ref={r => {
                     if (r)
@@ -445,6 +505,12 @@ const SnapSheet = forwardRef(function SnapSheet({
                     ref={r => {
                         if (r) sheetNodeId.current = findNodeHandle(r);
                     }}
+                    onLayout={e => {
+                        e.currentTarget.measure((x, y, w, h, px, py) => {
+                            sheetSizing.current = { w, h, px, py };
+                            scheduleAnchorUpdate();
+                        });
+                    }}
                     style={conStyle}
                     {...panResponder.panHandlers}>
                     {doRendable?.(
@@ -454,110 +520,163 @@ const SnapSheet = forwardRef(function SnapSheet({
                         </View>
                     )}
                     <View style={styling.flexer}>
-                        <DodgeKeyboard
+                        <DodgeKeyboardComponent
                             ref={dodgeRef}
                             offset={keyboardDodgingOffset}
                             disabled={disableDodging}
                             checkIfElementIsFocused={__checkIfElementIsFocused}
+                            _perceivedDodgeInputSize={_perceivedDodgeInputSize}
                             onHandleDodging={quicklyDodgeKeyboard}>
-                            <ReactHijacker
-                                enableLocator
-                                doHijack={(node, path) => {
-                                    if (node?.props?.snap_sheet_scan_off || node?.props?.__checking_snap_scrollable)
-                                        return createHijackedElement(node);
+                            <MutateReact
+                                onHandleMutation={node => {
+                                    const injectChild = (node, wasNested) => {
+                                        if (node?.props?.snap_sheet_scan_off || node?.props?.__checking_snap_scrollable)
+                                            return createMutantElement(node);
 
-                                    const thisScrollable = isScrollable(node);
+                                        const thisScrollable = isScrollable(node);
+                                        const rootRenderItem = node?.props?.renderItem;
 
-                                    if (!node?.props?.scroll_anchor_snap_avoid && !thisScrollable) return;
+                                        let hasInternalList;
 
-                                    const renderer = () => {
-                                        const instanceId = useMemo(() => `${++instanceIdIterator.current}`, []);
+                                        if (!node?.props?.scroll_anchor_snap_avoid && !thisScrollable) {
+                                            if (
+                                                !wasNested &&
+                                                node?.props?.horizontal &&
+                                                typeof rootRenderItem === 'function' &&
+                                                !node?.props?.children
+                                            ) {
+                                                hasInternalList = true;
+                                            } else return;
+                                        }
 
-                                        useEffect(() => {
-                                            return () => {
-                                                if (scrollRefObj.current.hasOwnProperty(instanceId)) {
-                                                    delete scrollRefObj.current[instanceId];
-                                                    scheduleAnchorUpdate();
+                                        const renderer = () => {
+                                            const instanceId = useMemo(() => `${++instanceIdIterator.current}`, [hasInternalList]);
+
+                                            useEffect(() => {
+                                                return () => {
+                                                    if (scrollRefObj.current.hasOwnProperty(instanceId)) {
+                                                        delete scrollRefObj.current[instanceId];
+                                                        scheduleAnchorUpdate();
+                                                    }
+
+                                                    if (avoidableSurfaces.current.hasOwnProperty(instanceId)) {
+                                                        delete avoidableSurfaces.current[instanceId];
+                                                        scheduleAnchorUpdate();
+                                                    }
                                                 }
+                                            }, [hasInternalList]);
 
-                                                if (avoidableSurfaces.current.hasOwnProperty(instanceId))
-                                                    delete avoidableSurfaces.current[instanceId];
-                                            }
-                                        }, []);
-
-                                        const initNode = () => {
-                                            const wasAssigned = scrollRefObj.current.hasOwnProperty(instanceId);
-
-                                            if (!scrollRefObj.current[instanceId])
-                                                scrollRefObj.current[instanceId] = {
-                                                    scrollY: 0,
-                                                    location: path
+                                            if (hasInternalList) {
+                                                const newProps = {
+                                                    ...node?.props,
+                                                    renderItem: (...args) => {
+                                                        return (
+                                                            <MutateReact onHandleMutation={n => injectChild(n, true)}>
+                                                                {rootRenderItem(...args)}
+                                                            </MutateReact>
+                                                        );
+                                                    }
                                                 };
 
-                                            const thisAnchorId = node.props?.snap_sheet_scroll_anchor;
-
-                                            if (scrollRefObj.current[instanceId].anchorId !== thisAnchorId || !wasAssigned) {
-                                                scheduleAnchorUpdate(300);
+                                                return cloneElement(node, newProps);
                                             }
-                                            scrollRefObj.current[instanceId].anchorId = thisAnchorId;
-                                        }
 
-                                        if (thisScrollable) initNode();
+                                            const initNode = () => {
+                                                const wasAssigned = scrollRefObj.current.hasOwnProperty(instanceId);
 
-                                        const updatePlacement = (ref) => {
-                                            if (ref && sheetNodeId.current !== undefined)
-                                                UIManager.measureLayout(
-                                                    findNodeHandle(ref),
-                                                    findNodeHandle(sheetNodeId.current),
-                                                    () => { },
-                                                    (l, t, w, h) => {
-                                                        avoidableSurfaces.current[instanceId] = { l, t, w, h };
-                                                    }
-                                                );
-                                        }
+                                                if (!scrollRefObj.current[instanceId])
+                                                    scrollRefObj.current[instanceId] = { scrollY: 0 };
 
-                                        const newProps = {
-                                            ...node?.props,
-                                            __checking_snap_scrollable: true,
-                                            ref: r => {
-                                                if (r) {
-                                                    if (thisScrollable) {
-                                                        initNode();
-                                                        scrollRefObj.current[instanceId].ref = r;
-                                                    }
-                                                    updatePlacement(r);
+                                                const thisAnchorId = node.props?.snap_sheet_scroll_anchor;
+
+                                                if (scrollRefObj.current[instanceId].anchorId !== thisAnchorId || !wasAssigned) {
+                                                    scheduleAnchorUpdate(100);
+                                                }
+                                                scrollRefObj.current[instanceId].anchorId = thisAnchorId;
+                                            }
+
+                                            if (thisScrollable) initNode();
+
+                                            const updatePlacement = (ref) => {
+                                                if (!ref || sheetNodeId.current === undefined) return;
+
+                                                const id = findNodeHandle(ref);
+                                                const thisObj = { ...avoidableSurfaces.current[instanceId] };
+                                                avoidableSurfaces.current[instanceId] = thisObj;
+
+                                                const copyOver = o => {
+                                                    if (avoidableSurfaces.current[instanceId] === thisObj)
+                                                        Object.entries(o)
+                                                            .forEach(([k, v]) => {
+                                                                thisObj[k] = v;
+                                                            });
                                                 }
 
-                                                const thatRef = node.props?.ref;
-                                                if (typeof thatRef === 'function') {
-                                                    thatRef(r);
-                                                } else if (thatRef) thatRef.current = r;
-                                            },
-                                            onLayout: e => {
-                                                updatePlacement(e.currentTarget);
-                                                node.props?.onLayout?.(e);
-                                            },
-                                            ...thisScrollable ? {
-                                                ...disableDodging ? {} : { ['dodge_keyboard_scrollable']: true },
-                                                onScroll: e => {
-                                                    onAnchorScroll(e, instanceId);
-                                                    return node.props?.onScroll?.(e);
+                                                UIManager.measureLayout(
+                                                    id,
+                                                    sheetNodeId.current,
+                                                    () => { },
+                                                    (l, t, w, h) => {
+                                                        copyOver({ l, t, w, h });
+                                                    }
+                                                );
+
+                                                requestAnimationFrame(() => {
+                                                    if (sheetNodeId.current !== undefined) {
+                                                        UIManager.measure(
+                                                            id,
+                                                            (x, y, w, h, px, py) => {
+                                                                copyOver({ w, h, px, py });
+                                                                if (thisScrollable) scheduleAnchorUpdate();
+                                                            }
+                                                        );
+                                                    }
+                                                });
+                                            }
+
+                                            const newProps = {
+                                                ...node?.props,
+                                                __checking_snap_scrollable: true,
+                                                ref: r => {
+                                                    if (r) {
+                                                        if (thisScrollable) {
+                                                            initNode();
+                                                            scrollRefObj.current[instanceId].ref = r;
+                                                        }
+                                                        updatePlacement(r);
+                                                    }
+
+                                                    const thatRef = node.props?.ref;
+                                                    if (typeof thatRef === 'function') {
+                                                        thatRef(r);
+                                                    } else if (thatRef) thatRef.current = r;
                                                 },
-                                                ...prefferedAnchor === instanceId ? { scrollEnabled } : {}
-                                            } : {}
-                                        };
+                                                onLayout: e => {
+                                                    updatePlacement(e.currentTarget);
+                                                    node.props?.onLayout?.(e);
+                                                },
+                                                ...thisScrollable ? {
+                                                    ...disableDodging ? {} : { ['dodge_keyboard_scrollable']: true },
+                                                    onScroll: e => {
+                                                        onAnchorScroll(e, instanceId);
+                                                        return node.props?.onScroll?.(e);
+                                                    },
+                                                    ...prefferedAnchor === instanceId ? { scrollEnabled } : {}
+                                                } : {}
+                                            };
 
-                                        return cloneElement(node, newProps);
-                                    }
+                                            return cloneElement(node, newProps);
+                                        }
 
-                                    return createHijackedElement(
-                                        <__HijackNode>
-                                            {renderer}
-                                        </__HijackNode>
-                                    );
+                                        return createMutantElement(
+                                            <SnapMutantNode onHandler={renderer} />
+                                        );
+                                    };
+
+                                    return injectChild(node);
                                 }}>
                                 {children}
-                            </ReactHijacker>
+                            </MutateReact>
                             {isLift ?
                                 <View
                                     ref={r => {
@@ -569,7 +688,7 @@ const SnapSheet = forwardRef(function SnapSheet({
                                     dodge_keyboard_clipping
                                     style={styling.fakePlaceholder}
                                 /> : null}
-                        </DodgeKeyboard>
+                        </DodgeKeyboardComponent>
                     </View>
                 </Animated.View>
             </View>
@@ -577,8 +696,15 @@ const SnapSheet = forwardRef(function SnapSheet({
     );
 });
 
+function SnapMutantNode({ onHandler }) {
+    return onHandler();
+}
+
 const isScrollable = (element, disableTagCheck) => {
-    if (element?.props?.['snap_sheet_scroll_anchor']) return true;
+    if (
+        element?.props?.['snap_sheet_scroll_anchor'] ||
+        element?.props?.['snap_sheet_scrollable']
+    ) return true;
     if (!element?.type || element?.props?.horizontal || disableTagCheck) return false;
 
     const scrollableTypes = ["ScrollView", "FlatList", "SectionList", "VirtualizedList"];
@@ -587,27 +713,65 @@ const isScrollable = (element, disableTagCheck) => {
         || scrollableTypes.includes(element.type?.name);
 };
 
-function extractPath(entry) {
-    return entry.filter(v => typeof v === 'number');
-}
+/**
+ * Find the child that is most visible and covers the largest area.
+ *
+ * @param {number} containerWidth
+ * @param {number} containerHeight
+ * @param {Array<{width: number, height: number, x: number, y: number}>} list
+ * @returns {number}
+ */
+function getIndexOfMostVisibleArea(
+    containerWidth,
+    containerHeight,
+    list
+) {
+    const containerArea = containerWidth * containerHeight;
 
-// lexicographic comparison of two paths
-function compareReactPaths(a, b) {
-    const pa = extractPath(a);
-    const pb = extractPath(b);
-
-    const len = Math.max(pa.length, pb.length);
-
-    for (let i = 0; i < len; i++) {
-        const av = pa[i];
-        const bv = pb[i];
-
-        if (av === undefined) return -1;  // a ends early -> comes first
-        if (bv === undefined) return 1;   // b ends early -> comes first
-
-        if (av !== bv) return av - bv;    // normal numeric comparison
+    if (!list.length || containerArea <= 0) {
+        return -1;
     }
-    return 0;
+
+    let bestIndex = -1;
+    let bestScore = -1;
+    let bestVisibleArea = -1;
+
+    for (let i = 0; i < list.length; i++) {
+        const { width, height, x, y } = list[i];
+
+        const visibleWidth = Math.max(
+            0,
+            Math.min(containerWidth, x + width) - Math.max(0, x)
+        );
+
+        const visibleHeight = Math.max(
+            0,
+            Math.min(containerHeight, y + height) - Math.max(0, y)
+        );
+
+        const visibleArea = visibleWidth * visibleHeight;
+        const totalArea = Math.max(0, width * height);
+
+        const visibilityRatio =
+            totalArea > 0 ? visibleArea / totalArea : 0;
+
+        const containerCoverage = visibleArea / containerArea;
+
+        const score =
+            containerCoverage * 0.7 +
+            visibilityRatio * 0.3;
+
+        if (
+            score > bestScore ||
+            (score === bestScore && visibleArea > bestVisibleArea)
+        ) {
+            bestIndex = i;
+            bestScore = score;
+            bestVisibleArea = visibleArea;
+        }
+    }
+
+    return bestIndex;
 }
 
 export default SnapSheet;
