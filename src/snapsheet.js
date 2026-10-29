@@ -27,7 +27,8 @@ const SnapSheet = forwardRef(function SnapSheet({
     disabled,
     currentAnchorId,
     __forceDisableDodging,
-    _perceivedDodgeInputSize,
+    _optimalDodgeThresold = .35,
+    _optimalDodgeOffset,
     __checkIfElementIsFocused,
     __loosenMinSnap
 }, ref) {
@@ -38,6 +39,12 @@ const SnapSheet = forwardRef(function SnapSheet({
 
     if (__forceDisableDodging && keyboardDodgingBehaviour !== 'off')
         throw `__forceDisableDodging requires setting keyboardDodgingBehaviour to 'off'`;
+
+    if (_optimalDodgeOffset !== undefined && !isNumber(_optimalDodgeOffset))
+        throw `_optimalDodgeOffset should be a number but got ${_optimalDodgeOffset}`;
+
+    if (_optimalDodgeThresold !== undefined && !isNumber(_optimalDodgeThresold))
+        throw `_optimalDodgeThresold should be a number but got ${_optimalDodgeThresold}`;
 
     if (snapPoints.length < 2) throw new Error('snapPoints must have at least two items');
     snapPoints.forEach((v, i, a) => {
@@ -198,18 +205,19 @@ const SnapSheet = forwardRef(function SnapSheet({
         if (!isLifting.current) snapToIndex.current(Math.min(lastSnapIndex.current, snapPoints.length - 1), true);
     }, [snapPointsKey]);
 
-    _perceivedDodgeInputSize =
+    _optimalDodgeOffset =
         useMemo(() => {
             if (keyboardDodgingBehaviour !== 'optimum' || __checkIfElementIsFocused) return;
-            if (_perceivedDodgeInputSize !== undefined)
-                return _perceivedDodgeInputSize;
+            if (_optimalDodgeOffset !== undefined) return _optimalDodgeOffset;
+
+            const baseLift = MODAL_HEIGHT * (_optimalDodgeThresold ?? .35);
 
             if (parentHeight === undefined) {
-                return MODAL_HEIGHT * .35;
+                return baseLift;
             }
 
-            return Math.max(0, Math.min(MODAL_HEIGHT * .35, (parentHeight - MODAL_HEIGHT) * .8));
-        }, [_perceivedDodgeInputSize, parentHeight, MODAL_HEIGHT, keyboardDodgingBehaviour, !__checkIfElementIsFocused]);
+            return Math.max(0, Math.min(baseLift, parentHeight - MODAL_HEIGHT)) || undefined;
+        }, [_optimalDodgeOffset, parentHeight, MODAL_HEIGHT, keyboardDodgingBehaviour, !__checkIfElementIsFocused]);
 
     const panResponder = useMemo(() => {
         // <--- dx negative, dx positive --->
@@ -525,7 +533,7 @@ const SnapSheet = forwardRef(function SnapSheet({
                             offset={keyboardDodgingOffset}
                             disabled={disableDodging}
                             checkIfElementIsFocused={__checkIfElementIsFocused}
-                            _perceivedDodgeInputSize={_perceivedDodgeInputSize}
+                            _perceivedDodgeInputSize={_optimalDodgeOffset}
                             onHandleDodging={quicklyDodgeKeyboard}>
                             <MutateReact
                                 onHandleMutation={node => {
